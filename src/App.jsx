@@ -1,29 +1,49 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Home from './pages/Home';
 import Portfolio from './pages/Portfolio';
 import BottomNav from './components/BottomNav';
 import CoinDetail from './pages/CoinDetail';
-import { CryptoProvider } from './context/CryptoContext';
+import Login from './pages/Login'; 
+import Signup from './pages/Signup'; 
+import { CryptoProvider, useCrypto } from './context/CryptoContext';
+
+const ProtectedRoute = ({ children }) => {
+  const { user } = useCrypto();
+  if (!user) {
+    return <Navigate to="/login" />;
+  }
+  return children;
+};
 
 function App() {
   return (
     <CryptoProvider>
-    <BrowserRouter>
-      
-      <div className="min-h-screen bg-slate-900 text-white font-sans">
+      <BrowserRouter>
+        <AppContent />
+      </BrowserRouter>
+    </CryptoProvider>
+  );
+}
+
+function AppContent() {
+  const { user } = useCrypto();
+
+  return (
+    <div className="min-h-screen bg-slate-900 text-white font-sans">
+      <Routes>
         
-        
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/coin/:id" element={<CoinDetail />} />
-          <Route path="/portfolio" element={<Portfolio />} />
-        </Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
 
         
-        <BottomNav />
-      </div>
-    </BrowserRouter>
-    </CryptoProvider>
+        <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
+        <Route path="/coin/:id" element={<ProtectedRoute><CoinDetail /></ProtectedRoute>} />
+        <Route path="/portfolio" element={<ProtectedRoute><Portfolio /></ProtectedRoute>} />
+      </Routes>
+
+      
+      {user && <BottomNav />}
+    </div>
   );
 }
 
