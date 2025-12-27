@@ -3,9 +3,11 @@ import Home from './pages/Home';
 import Portfolio from './pages/Portfolio';
 import BottomNav from './components/BottomNav';
 import CoinDetail from './pages/CoinDetail';
+import { CryptoProvider } from './context/CryptoContext';
 
 function App() {
   return (
+    <CryptoProvider>
     <BrowserRouter>
       
       <div className="min-h-screen bg-slate-900 text-white font-sans">
@@ -21,6 +23,7 @@ function App() {
         <BottomNav />
       </div>
     </BrowserRouter>
+    </CryptoProvider>
   );
 }
 
