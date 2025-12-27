@@ -44,8 +44,32 @@ export const CryptoProvider = ({ children }) => {
     alert("Transaction Successful!");
   };
 
+  const sellCoin = (coinId, amount, price) => {
+    const asset = assets.find((a) => a.id === coinId);
+
+    if (!asset || asset.amount < parseFloat(amount)) {
+      alert("Insufficient Coin Supply!");
+      return;
+    }
+
+    const totalValue = amount * price;
+
+    setBalance((prev) => prev + totalValue);
+
+    setAssets((prev) => {
+      return prev.map((item) => {
+        if (item.id === coinId) {
+          return { ...item, amount: item.amount - parseFloat(amount) };
+        }
+        return item;
+      }).filter((item) => item.amount > 0); 
+    });
+
+    alert("Sale successful!");
+  };
+
   return (
-    <CryptoContext.Provider value={{ balance, assets, buyCoin }}>
+    <CryptoContext.Provider value={{ balance, assets, buyCoin, sellCoin }}>
       {children}
     </CryptoContext.Provider>
   );

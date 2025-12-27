@@ -1,18 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getCoinHistory, getMarketData } from '../services/api'; 
+import { getCoinHistory, getMarketData } from '../services/api';
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from 'recharts';
 import { AiOutlineArrowLeft } from 'react-icons/ai';
-import { useCrypto } from '../context/CryptoContext'; 
+import { useCrypto } from '../context/CryptoContext';
 
 const CoinDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { buyCoin, balance } = useCrypto(); 
+  const { buyCoin, sellCoin, balance, assets } = useCrypto(); 
   
   const [history, setHistory] = useState([]);
-  const [currentPrice, setCurrentPrice] = useState(0); 
-  const [amount, setAmount] = useState(''); 
+  const [currentPrice, setCurrentPrice] = useState(0);
+  const [amount, setAmount] = useState('');
+
+  
+  const myAsset = assets.find(a => a.id === id);
+  const myAmount = myAsset ? myAsset.amount : 0;
 
   useEffect(() => {
     getCoinHistory(id).then(setHistory);
@@ -25,7 +29,13 @@ const CoinDetail = () => {
   const handleBuy = () => {
     if (!amount || amount <= 0) return;
     buyCoin(id, amount, currentPrice);
-    setAmount(''); 
+    setAmount('');
+  };
+
+  const handleSell = () => {
+    if (!amount || amount <= 0) return;
+    sellCoin(id, amount, currentPrice);
+    setAmount('');
   };
 
   return (
@@ -37,7 +47,6 @@ const CoinDetail = () => {
         <h1 className="text-2xl font-bold text-white capitalize">{id}</h1>
       </div>
 
-      
       <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 h-[250px] mb-6">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={history}>
@@ -47,31 +56,43 @@ const CoinDetail = () => {
         </ResponsiveContainer>
       </div>
 
-      
       <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
         <div className="flex justify-between items-center mb-4">
           <span className="text-gray-400">Current Price</span>
           <span className="text-2xl font-bold">${currentPrice.toLocaleString()}</span>
         </div>
 
-        <div className="flex justify-between items-center mb-4 text-sm">
-          <span className="text-gray-400">Your Balance</span>
-          <span className="text-green-400 font-bold">${balance.toLocaleString()}</span>
+        <div className="grid grid-cols-2 gap-4 mb-6 text-sm">
+          <div className="bg-slate-900 p-3 rounded-lg">
+            <p className="text-gray-400 mb-1">Your Balance</p>
+            <p className="text-green-400 font-bold">${balance.toLocaleString()}</p>
+          </div>
+          <div className="bg-slate-900 p-3 rounded-lg">
+            <p className="text-gray-400 mb-1">You Own</p>
+            <p className="text-blue-400 font-bold">{myAmount} {id.toUpperCase()}</p>
+          </div>
         </div>
 
+        {/* Alım - Satım Paneli */}
         <div className="flex gap-2">
           <input 
             type="number" 
-            placeholder="Amount (e.g. 0.5)" 
+            placeholder="Amount" 
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             className="flex-1 bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500"
           />
           <button 
             onClick={handleBuy}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 rounded-lg transition-colors"
+            className="bg-green-600 hover:bg-green-700 text-white font-bold px-4 rounded-lg transition-colors flex-1"
           >
             BUY
+          </button>
+          <button 
+            onClick={handleSell}
+            className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 rounded-lg transition-colors flex-1"
+          >
+            SELL
           </button>
         </div>
       </div>
