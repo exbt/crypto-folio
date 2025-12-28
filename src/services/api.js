@@ -1,75 +1,36 @@
 import axios from 'axios';
 
-const API_URL = 'https://api.coingecko.com/api/v3';
 
-let marketCache = {
-  data: [],
-  lastFetch: 0
-};
-
-let historyCache = {};
 
 export const getMarketData = async () => {
-    const now = Date.now();
-    const CACHE_DURATION = 60000;
-
-    if (marketCache.data.length > 0 && (now - marketCache.lastFetch < CACHE_DURATION)) {
-    // console.log("Using Cached Market Data"); 
-    return marketCache.data;
-    }
   try {
-    const response = await axios.get(`${API_URL}/coins/markets`, {
-      params: {
-        vs_currency: 'usd',
-        order: 'market_cap_desc',
-        per_page: 50,
-        page: 1,
-        sparkline: false
-      }
-    });
-
-    marketCache = {
-      data: response.data,
-      lastFetch: now
-    };
-
+    const response = await axios.get(
+      "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=200&page=1&sparkline=false"
+    );
+    
     return response.data;
   } catch (error) {
-    // console.error("API Error (Market):", error);
-    return marketCache.data;
+    if (error.response && error.response.status === 429) {
+      console.warn("API Quota Exceeded (429). Please wait a little while...");
+
+      return []; 
+    }
+    console.error("API Error:", error);
+    return [];
   }
 };
 
-export const getCoinHistory = async (coinId) => {
-    const now = Date.now();
-    const CACHE_DURATION = 300000;
-    const cached = historyCache[coinId];
-
-    if (cached && (now - cached.lastFetch < CACHE_DURATION)) {
-    // console.log(`Using Cached History for ${coinId}`);
-    return cached.data;
-    }
-
+export const getCoinHistory = async (id) => {
   try {
-    const response = await axios.get(`${API_URL}/coins/${coinId}/market_chart`, {
-      params: {
-        vs_currency: 'usd',
-        days: '7',
-      }
-    });
+    const response = await axios.get(
+      `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=30`
+    );
     return response.data.prices.map(price => ({
-      timestamp: price[0],
-      price: price[1]
+        date: new Date(price[0]).toLocaleDateString(),
+        price: price[1]
     }));
-
-    historyCache[coinId] = {
-      data: formattedData,
-      lastFetch: now
-    };
-
-    return formattedData;
   } catch (error) {
-    // console.error("API Error (History):", error);
-    return cached ? cached.data : [];
+    console.error("Graphical data could not be obtained.", error);
+    return [];
   }
 };

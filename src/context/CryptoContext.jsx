@@ -188,18 +188,40 @@ export const CryptoProvider = ({ children }) => {
     const buyCoin = async (coinId, amount, price) => {
         if (!user) return;
         const totalCost = amount * price;
-        if (totalCost > balance) { 
-             toast.error("Insufficient balance! Check your wallet."); 
-             return; 
-         }
+        if (totalCost > balance) {
+            toast.error("Insufficient balance! Check your wallet.");
+            return;
+        }
 
         const newBalance = balance - totalCost;
         let newAssets = [...assets];
         const existingIndex = newAssets.findIndex(a => a.id === coinId);
-        if (existingIndex >= 0) newAssets[existingIndex].amount += parseFloat(amount);
-        else newAssets.push({ id: coinId, amount: parseFloat(amount) });
 
-        await updateDoc(doc(db, "users", user.uid), { balance: newBalance, assets: newAssets });
+        if (existingIndex >= 0) {
+            const currentAsset = newAssets[existingIndex];
+            const oldTotalCost = currentAsset.amount * (currentAsset.avgPrice || currentAsset.current_price || price);
+            const newTotalCost = oldTotalCost + totalCost;
+            const newTotalAmount = currentAsset.amount + parseFloat(amount);
+            const newAvgPrice = newTotalCost / newTotalAmount;
+
+            newAssets[existingIndex] = {
+                ...currentAsset,
+                amount: newTotalAmount,
+                avgPrice: newAvgPrice
+            };
+
+        } else {
+            newAssets.push({
+                id: coinId,
+                amount: parseFloat(amount),
+                avgPrice: price
+            });
+        }
+        const userRef = doc(db, "users", user.uid);
+        await updateDoc(userRef, {
+            balance: newBalance,
+            assets: newAssets
+        });
         await logTransaction('buy', `Bought ${coinId}`, totalCost, coinId);
 
         toast.success("Purchase successful!");
@@ -208,10 +230,10 @@ export const CryptoProvider = ({ children }) => {
     const sellCoin = async (coinId, amount, price) => {
         if (!user) return;
         const asset = assets.find(a => a.id === coinId);
-        
-        if (!asset || asset.amount < parseFloat(amount)) { 
-            toast.error("You don't have enough coins to sell!"); 
-            return; 
+
+        if (!asset || asset.amount < parseFloat(amount)) {
+            toast.error("You don't have enough coins to sell!");
+            return;
         }
 
         const earnings = amount * price;
