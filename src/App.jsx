@@ -6,6 +6,7 @@ import CoinDetail from './pages/CoinDetail';
 import Login from './pages/Login'; 
 import Signup from './pages/Signup'; 
 import { CryptoProvider, useCrypto } from './context/CryptoContext';
+import { Toaster } from 'react-hot-toast';
 
 const ProtectedRoute = ({ children }) => {
   const { user } = useCrypto();
@@ -25,23 +26,47 @@ function App() {
   );
 }
 
+
 function AppContent() {
   const { user } = useCrypto();
 
   return (
     <div className="min-h-screen bg-slate-900 text-white font-sans">
+      
+      
+      <Toaster 
+         position="top-center" 
+         toastOptions={{
+            style: {
+              background: '#334155', 
+              color: '#fff',        
+              borderRadius: '10px',
+              border: '1px solid #475569',
+            },
+            success: {
+              iconTheme: {
+                primary: '#22c55e', 
+                secondary: 'white',
+              },
+            },
+            error: {
+              iconTheme: {
+                primary: '#ef4444', 
+                secondary: 'white',
+              },
+            },
+         }}
+       />
+
       <Routes>
-        
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
 
-        
         <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
         <Route path="/coin/:id" element={<ProtectedRoute><CoinDetail /></ProtectedRoute>} />
         <Route path="/portfolio" element={<ProtectedRoute><Portfolio /></ProtectedRoute>} />
       </Routes>
 
-      
       {user && <BottomNav />}
     </div>
   );
