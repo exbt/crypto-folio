@@ -79,7 +79,7 @@ export const CryptoProvider = ({ children }) => {
     };
 
 
-    const logTransaction = async (type, description, amount, coinId = null) => {
+    const logTransaction = async (type, description, amount, coinId = null, executionPrice = 0, totalValue = 0) => {
         if (!user) return;
         const transRef = collection(db, "users", user.uid, "transactions");
         await addDoc(transRef, {
@@ -87,6 +87,8 @@ export const CryptoProvider = ({ children }) => {
             description,
             amount: parseFloat(amount),
             coinId,
+            executionPrice: parseFloat(executionPrice),
+            totalValue: parseFloat(totalValue),
             date: serverTimestamp()
         });
     };
@@ -123,8 +125,8 @@ export const CryptoProvider = ({ children }) => {
                     transaction.update(receiverRef, { balance: (receiverData.balance || 0) + transferAmount });
 
 
-                    const senderLog = { type: 'send', description: `Sent cash to ${targetId}`, amount: transferAmount, date: serverTimestamp() };
-                    const receiverLog = { type: 'receive', description: `Received cash from ${user.uid}`, amount: transferAmount, date: serverTimestamp() };
+                    const senderLog = { type: 'send', description: `Sent cash to ${targetId}`, amount: transferAmount, executionPrice: 1, totalValue: transferAmount, date: serverTimestamp() };
+                    const receiverLog = { type: 'receive', description: `Received cash from ${user.uid}`, amount: transferAmount, executionPrice: 1, totalValue: transferAmount, date: serverTimestamp() };
 
 
                     const newSenderLogRef = doc(senderHistoryRef);
@@ -156,8 +158,8 @@ export const CryptoProvider = ({ children }) => {
                     transaction.update(receiverRef, { assets: receiverAssets });
 
 
-                    const senderLog = { type: 'send', description: `Sent ${coinId} to ${targetId}`, amount: transferAmount, coinId, date: serverTimestamp() };
-                    const receiverLog = { type: 'receive', description: `Received ${coinId} from ${user.uid}`, amount: transferAmount, coinId, date: serverTimestamp() };
+                    const senderLog = { type: 'send', description: `Sent ${coinId} to ${targetId}`, amount: transferAmount, coinId, executionPrice: 0, totalValue: 0, date: serverTimestamp() };
+                    const receiverLog = { type: 'receive', description: `Received ${coinId} from ${user.uid}`, amount: transferAmount, coinId, executionPrice: 0, totalValue: 0, date: serverTimestamp() };
 
                     const newSenderLogRef = doc(senderHistoryRef);
                     const newReceiverLogRef = doc(receiverHistoryRef);
@@ -176,13 +178,11 @@ export const CryptoProvider = ({ children }) => {
     const logout = () => signOut(auth);
 
 
-    const updateUserPortfolio = async (newAssets, newBalance, dustAmount) => {
+   const updateUserPortfolio = async (newAssets, newBalance, totalDustValue, dustDetails = []) => {
         if (!user) return;
         const userRef = doc(db, "users", user.uid);
         await updateDoc(userRef, { assets: newAssets, balance: newBalance });
-
-
-        await logTransaction('dust', 'Converted dust to cash', dustAmount);
+        await logTransaction('dust', `Converted dust assets to cash`, 1, 'mixed', totalDustValue, totalDustValue);
     };
 
     const buyCoin = async (coinId, amount, price) => {
@@ -199,17 +199,15 @@ export const CryptoProvider = ({ children }) => {
 
         if (existingIndex >= 0) {
             const currentAsset = newAssets[existingIndex];
-            const oldTotalCost = currentAsset.amount * (currentAsset.avgPrice || currentAsset.current_price || price);
-            const newTotalCost = oldTotalCost + totalCost;
-            const newTotalAmount = currentAsset.amount + parseFloat(amount);
-            const newAvgPrice = newTotalCost / newTotalAmount;
-
+            const currentTotalCost = currentAsset.amount * (currentAsset.avgPrice || currentAsset.current_price || price);
+            const newPurchaseCost = totalCost;
+            const totalAmount = currentAsset.amount + parseFloat(amount);
+            const newAvgPrice = (currentTotalCost + newPurchaseCost) / totalAmount;
             newAssets[existingIndex] = {
                 ...currentAsset,
-                amount: newTotalAmount,
+                amount: totalAmount,
                 avgPrice: newAvgPrice
             };
-
         } else {
             newAssets.push({
                 id: coinId,
@@ -217,13 +215,14 @@ export const CryptoProvider = ({ children }) => {
                 avgPrice: price
             });
         }
+
         const userRef = doc(db, "users", user.uid);
         await updateDoc(userRef, {
             balance: newBalance,
             assets: newAssets
         });
-        await logTransaction('buy', `Bought ${coinId}`, totalCost, coinId);
 
+        await logTransaction('buy', `Bought ${coinId} @ $${price.toLocaleString()}`, amount, coinId, price, totalCost);
         toast.success("Purchase successful!");
     };
 
@@ -238,10 +237,15 @@ export const CryptoProvider = ({ children }) => {
 
         const earnings = amount * price;
         const newBalance = balance + earnings;
-        let newAssets = assets.map(item => item.id === coinId ? { ...item, amount: item.amount - parseFloat(amount) } : item).filter(item => item.amount > 0.0000001);
+         let newAssets = assets.map(item => {
+            if (item.id === coinId) {
+                return { ...item, amount: item.amount - parseFloat(amount) };
+            }
+            return item;
+        }).filter(item => item.amount > 0.00000001);
 
         await updateDoc(doc(db, "users", user.uid), { balance: newBalance, assets: newAssets });
-        await logTransaction('sell', `Sold ${coinId}`, earnings, coinId);
+        await logTransaction('sell', `Sold ${coinId} @ $${price.toLocaleString()}`, amount, coinId, price, earnings);
         toast.success("The sale transaction has been completed.");
     };
 

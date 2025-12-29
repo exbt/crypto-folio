@@ -34,3 +34,24 @@ export const getCoinHistory = async (id) => {
     return [];
   }
 };
+
+export const getCoinMasterList = async () => {
+    try {
+        const response = await fetch("https://api.coingecko.com/api/v3/coins/list?include_platform=false");
+        const data = await response.json();
+        
+       
+        const map = {};
+        data.forEach(coin => {
+            map[coin.id] = {
+                symbol: coin.symbol.toUpperCase(),
+                name: coin.name 
+            };
+        });
+        
+        return map;
+    } catch (error) {
+        console.error("Master Liste Hatası:", error);
+        return {}; 
+    }
+};
