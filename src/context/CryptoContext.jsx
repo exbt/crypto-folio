@@ -29,7 +29,6 @@ export const CryptoProvider = ({ children }) => {
             if (cachedData && cachedTime && (now - cachedTime < ONE_DAY)) {
                 setCryptoMasterList(JSON.parse(cachedData));
                 setIsMasterLoading(false);
-                // console.log("Data loaded from device cache (Cache Hit).");
             } else {
                 try {
                     const data = await getMarketData();
@@ -37,10 +36,9 @@ export const CryptoProvider = ({ children }) => {
                         setCryptoMasterList(data);
                         localStorage.setItem("cryptoMasterList", JSON.stringify(data));
                         localStorage.setItem("cryptoMasterListTime", now.toString());
-                        // console.log("Data fetched from API and saved.");
                     }
                 } catch (error) {
-                    // console.error("Data fetching error:", error);
+                    console.error("Data error:", error);
                 } finally {
                     setIsMasterLoading(false);
                 }
@@ -76,7 +74,18 @@ export const CryptoProvider = ({ children }) => {
     const login = (email, password) => signInWithEmailAndPassword(auth, email, password);
     const logout = () => signOut(auth);
     
-    const logTransaction = async (type, desc, amount, coinId, exPrice, totalVal) => { if(!user) return; await addDoc(collection(db, "users", user.uid, "transactions"), { type, description: desc, amount: parseFloat(amount), coinId, executionPrice: parseFloat(exPrice), totalValue: parseFloat(totalVal), date: serverTimestamp() }); };
+    const logTransactionInternal = async (uid, type, desc, amount, coinId, exPrice, totalVal, targetId = null) => { 
+        await addDoc(collection(db, "users", uid, "transactions"), { 
+            type, 
+            description: desc, 
+            amount: parseFloat(amount), 
+            coinId: coinId || 'USD', 
+            executionPrice: parseFloat(exPrice), 
+            totalValue: parseFloat(totalVal), 
+            targetId: targetId, 
+            date: serverTimestamp() 
+        }); 
+    };
 
     const buyCoin = async (coinId, amount, price) => {
         if (!user) return;
@@ -95,7 +104,7 @@ export const CryptoProvider = ({ children }) => {
             newAssets.push({ id: coinId, amount: parseFloat(amount), avgPrice: price });
         }
         await updateDoc(doc(db, "users", user.uid), { balance: newBalance, assets: newAssets });
-        await logTransaction('buy', `Bought ${coinId}`, amount, coinId, price, total);
+        await logTransactionInternal(user.uid, 'buy', `Bought ${coinId}`, amount, coinId, price, total);
         toast.success("Buy order executed successfully");
     };
 
@@ -107,7 +116,7 @@ export const CryptoProvider = ({ children }) => {
         const newBalance = balance + earnings;
         let newAssets = assets.map(item => item.id === coinId ? { ...item, amount: item.amount - parseFloat(amount) } : item).filter(i => i.amount > 0.00000001);
         await updateDoc(doc(db, "users", user.uid), { balance: newBalance, assets: newAssets });
-        await logTransaction('sell', `Sold ${coinId}`, amount, coinId, price, earnings);
+        await logTransactionInternal(user.uid, 'sell', `Sold ${coinId}`, amount, coinId, price, earnings);
         toast.success("Sell order executed successfully");
     };
 
@@ -144,12 +153,18 @@ export const CryptoProvider = ({ children }) => {
                 t.update(receiverRef, { assets: rAssets });
             }
         });
+
+        const assetName = type === 'cash' ? 'USD' : coinId;
+        
+        await logTransactionInternal(user.uid, 'withdraw', `Sent to ${targetId}`, val, assetName, 0, val, targetId);
+        
+        await logTransactionInternal(targetId, 'deposit', `Received from ${user.uid}`, val, assetName, 0, val, user.uid);
     };
 
     const updateUserPortfolio = async (newAssets, newBalance, totalDust) => {
         if (!user) return;
         await updateDoc(doc(db, "users", user.uid), { assets: newAssets, balance: newBalance });
-        await logTransaction('dust', 'Converted dust', 1, 'mixed', totalDust, totalDust);
+        await logTransactionInternal(user.uid, 'dust', 'Converted dust', 1, 'mixed', totalDust, totalDust);
     };
 
     return (
@@ -157,8 +172,7 @@ export const CryptoProvider = ({ children }) => {
             user, loading, signUp, login, logout,
             balance, setBalance, assets, setAssets,
             buyCoin, sellCoin, userId, handleTransfer, updateUserPortfolio, transactions,
-            cryptoMasterList, 
-            isMasterLoading
+            cryptoMasterList, isMasterLoading
         }}>
             {!loading && children}
         </CryptoContext.Provider>
