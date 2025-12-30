@@ -7,6 +7,7 @@ import Login from './pages/Login';
 import Signup from './pages/Signup'; 
 import { CryptoProvider, useCrypto } from './context/CryptoContext';
 import { Toaster } from 'react-hot-toast';
+import TransactionHistory from './pages/TransactionHistory';
 
 const ProtectedRoute = ({ children }) => {
   const { user } = useCrypto();
@@ -65,6 +66,7 @@ function AppContent() {
         <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
         <Route path="/coin/:id" element={<ProtectedRoute><CoinDetail /></ProtectedRoute>} />
         <Route path="/portfolio" element={<ProtectedRoute><Portfolio /></ProtectedRoute>} />
+        <Route path="/transactions" element={<TransactionHistory />} />
       </Routes>
 
       {user && <BottomNav />}

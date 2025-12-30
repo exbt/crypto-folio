@@ -1,16 +1,9 @@
 import React, { createContext, useState, useContext, useEffect } from "react";
 import { auth, db } from "../firebase";
-import {
-    createUserWithEmailAndPassword,
-    signInWithEmailAndPassword,
-    signOut,
-    onAuthStateChanged
-} from "firebase/auth";
-import {
-    doc, setDoc, updateDoc, onSnapshot, runTransaction,
-    collection, addDoc, query, orderBy, serverTimestamp
-} from "firebase/firestore";
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword } from "firebase/auth";
+import { doc, setDoc, updateDoc, onSnapshot, collection, addDoc, query, orderBy, serverTimestamp, runTransaction } from "firebase/firestore";
 import toast from 'react-hot-toast';
+import { getMarketData } from '../services/api';
 
 const CryptoContext = createContext();
 
@@ -22,240 +15,150 @@ export const CryptoProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
     const [userId, setUserId] = useState("");
 
+    const [cryptoMasterList, setCryptoMasterList] = useState([]);
+    const [isMasterLoading, setIsMasterLoading] = useState(true);
+
+    useEffect(() => {
+        const loadMasterData = async () => {
+            const cachedData = localStorage.getItem("cryptoMasterList");
+            const cachedTime = localStorage.getItem("cryptoMasterListTime");
+            
+            const ONE_DAY = 24 * 60 * 60 * 1000;
+            const now = Date.now();
+
+            if (cachedData && cachedTime && (now - cachedTime < ONE_DAY)) {
+                setCryptoMasterList(JSON.parse(cachedData));
+                setIsMasterLoading(false);
+                // console.log("Data loaded from device cache (Cache Hit).");
+            } else {
+                try {
+                    const data = await getMarketData();
+                    if (data.length > 0) {
+                        setCryptoMasterList(data);
+                        localStorage.setItem("cryptoMasterList", JSON.stringify(data));
+                        localStorage.setItem("cryptoMasterListTime", now.toString());
+                        // console.log("Data fetched from API and saved.");
+                    }
+                } catch (error) {
+                    // console.error("Data fetching error:", error);
+                } finally {
+                    setIsMasterLoading(false);
+                }
+            }
+        };
+        loadMasterData();
+    }, []);
+
     useEffect(() => {
         const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
             setUser(currentUser);
             setLoading(false);
-
             if (currentUser) {
                 setUserId(currentUser.uid);
                 const userRef = doc(db, "users", currentUser.uid);
-
-
-                const unsubscribeSnapshot = onSnapshot(userRef, (coinDoc) => {
-                    if (coinDoc.exists()) {
-                        setBalance(coinDoc.data().balance);
-                        setAssets(coinDoc.data().assets || []);
+                const unsubscribeSnapshot = onSnapshot(userRef, (d) => {
+                    if (d.exists()) {
+                        setBalance(d.data().balance);
+                        setAssets(d.data().assets || []);
                     }
                 });
-
-
-                const transactionsRef = collection(db, "users", currentUser.uid, "transactions");
-                const q = query(transactionsRef, orderBy("date", "desc"));
-
-                const unsubscribeHistory = onSnapshot(q, (snapshot) => {
-                    const hist = snapshot.docs.map(doc => ({
-                        id: doc.id,
-                        ...doc.data()
-                    }));
-                    setTransactions(hist);
-                });
-
-                return () => {
-                    unsubscribeSnapshot();
-                    unsubscribeHistory();
-                };
+                const q = query(collection(db, "users", currentUser.uid, "transactions"), orderBy("date", "desc"));
+                const unsubscribeHistory = onSnapshot(q, (s) => setTransactions(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+                return () => { unsubscribeSnapshot(); unsubscribeHistory(); };
             } else {
-                setBalance(0);
-                setAssets([]);
-                setTransactions([]);
-                setUserId("");
+                setBalance(0); setAssets([]); setTransactions([]); setUserId("");
             }
         });
         return () => unsubscribeAuth();
     }, []);
 
-    const signUp = async (email, password) => {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        const newUser = userCredential.user;
-
-        await setDoc(doc(db, "users", newUser.uid), {
-            uid: newUser.uid,
-            balance: 10000,
-            assets: [],
-            email: email
-        });
-        return newUser;
-    };
-
-
-    const logTransaction = async (type, description, amount, coinId = null, executionPrice = 0, totalValue = 0) => {
-        if (!user) return;
-        const transRef = collection(db, "users", user.uid, "transactions");
-        await addDoc(transRef, {
-            type,
-            description,
-            amount: parseFloat(amount),
-            coinId,
-            executionPrice: parseFloat(executionPrice),
-            totalValue: parseFloat(totalValue),
-            date: serverTimestamp()
-        });
-    };
-
-
-    const handleTransfer = async (targetId, amount, type = 'cash', coinId = null) => {
-        const transferAmount = parseFloat(amount);
-
-        if (!user) throw new Error("You must log in.");
-        if (targetId === user.uid) throw new Error("You can't send it to yourself!");
-        if (transferAmount <= 0) throw new Error("Invalid amount.");
-
-        const senderRef = doc(db, "users", user.uid);
-        const receiverRef = doc(db, "users", targetId);
-
-
-        const senderHistoryRef = collection(db, "users", user.uid, "transactions");
-        const receiverHistoryRef = collection(db, "users", targetId, "transactions");
-
-        try {
-            await runTransaction(db, async (transaction) => {
-                const receiverDoc = await transaction.get(receiverRef);
-                if (!receiverDoc.exists()) throw "Recipient not found!";
-
-                const senderDoc = await transaction.get(senderRef);
-                const senderData = senderDoc.data();
-                const receiverData = receiverDoc.data();
-
-
-                if (type === 'cash') {
-                    if (senderData.balance < transferAmount) throw "Insufficient Balance:";
-
-                    transaction.update(senderRef, { balance: senderData.balance - transferAmount });
-                    transaction.update(receiverRef, { balance: (receiverData.balance || 0) + transferAmount });
-
-
-                    const senderLog = { type: 'send', description: `Sent cash to ${targetId}`, amount: transferAmount, executionPrice: 1, totalValue: transferAmount, date: serverTimestamp() };
-                    const receiverLog = { type: 'receive', description: `Received cash from ${user.uid}`, amount: transferAmount, executionPrice: 1, totalValue: transferAmount, date: serverTimestamp() };
-
-
-                    const newSenderLogRef = doc(senderHistoryRef);
-                    const newReceiverLogRef = doc(receiverHistoryRef);
-                    transaction.set(newSenderLogRef, senderLog);
-                    transaction.set(newReceiverLogRef, receiverLog);
-
-                } else if (type === 'asset') {
-                    const senderAssets = senderData.assets || [];
-                    const senderAssetIndex = senderAssets.findIndex(a => a.id === coinId);
-
-                    if (senderAssetIndex === -1 || senderAssets[senderAssetIndex].amount < transferAmount) {
-                        throw `Insufficient Coin: ${coinId}`;
-                    }
-
-                    senderAssets[senderAssetIndex].amount -= transferAmount;
-                    let newSenderAssets = senderAssets.filter(a => a.amount > 0.00000001);
-
-                    let receiverAssets = receiverData.assets || [];
-                    const receiverAssetIndex = receiverAssets.findIndex(a => a.id === coinId);
-
-                    if (receiverAssetIndex >= 0) {
-                        receiverAssets[receiverAssetIndex].amount += transferAmount;
-                    } else {
-                        receiverAssets.push({ id: coinId, amount: transferAmount });
-                    }
-
-                    transaction.update(senderRef, { assets: newSenderAssets });
-                    transaction.update(receiverRef, { assets: receiverAssets });
-
-
-                    const senderLog = { type: 'send', description: `Sent ${coinId} to ${targetId}`, amount: transferAmount, coinId, executionPrice: 0, totalValue: 0, date: serverTimestamp() };
-                    const receiverLog = { type: 'receive', description: `Received ${coinId} from ${user.uid}`, amount: transferAmount, coinId, executionPrice: 0, totalValue: 0, date: serverTimestamp() };
-
-                    const newSenderLogRef = doc(senderHistoryRef);
-                    const newReceiverLogRef = doc(receiverHistoryRef);
-                    transaction.set(newSenderLogRef, senderLog);
-                    transaction.set(newReceiverLogRef, receiverLog);
-                }
-            });
-            return true;
-        } catch (error) {
-            // console.error("Transfer Error:", error);
-            throw new Error(typeof error === 'string' ? error : "Transfer failed.");
-        }
-    };
-
+    const signUp = async (email, password) => { const r = await createUserWithEmailAndPassword(auth, email, password); await setDoc(doc(db, "users", r.user.uid), { uid: r.user.uid, balance: 10000, assets: [], email }); return r.user; };
     const login = (email, password) => signInWithEmailAndPassword(auth, email, password);
     const logout = () => signOut(auth);
-
-
-   const updateUserPortfolio = async (newAssets, newBalance, totalDustValue, dustDetails = []) => {
-        if (!user) return;
-        const userRef = doc(db, "users", user.uid);
-        await updateDoc(userRef, { assets: newAssets, balance: newBalance });
-        await logTransaction('dust', `Converted dust assets to cash`, 1, 'mixed', totalDustValue, totalDustValue);
-    };
+    
+    const logTransaction = async (type, desc, amount, coinId, exPrice, totalVal) => { if(!user) return; await addDoc(collection(db, "users", user.uid, "transactions"), { type, description: desc, amount: parseFloat(amount), coinId, executionPrice: parseFloat(exPrice), totalValue: parseFloat(totalVal), date: serverTimestamp() }); };
 
     const buyCoin = async (coinId, amount, price) => {
         if (!user) return;
-        const totalCost = amount * price;
-        if (totalCost > balance) {
-            toast.error("Insufficient balance! Check your wallet.");
-            return;
-        }
-
-        const newBalance = balance - totalCost;
+        const total = amount * price;
+        if (total > balance) { toast.error("Insufficient balance"); return; }
+        const newBalance = balance - total;
         let newAssets = [...assets];
-        const existingIndex = newAssets.findIndex(a => a.id === coinId);
-
-        if (existingIndex >= 0) {
-            const currentAsset = newAssets[existingIndex];
-            const currentTotalCost = currentAsset.amount * (currentAsset.avgPrice || currentAsset.current_price || price);
-            const newPurchaseCost = totalCost;
-            const totalAmount = currentAsset.amount + parseFloat(amount);
-            const newAvgPrice = (currentTotalCost + newPurchaseCost) / totalAmount;
-            newAssets[existingIndex] = {
-                ...currentAsset,
-                amount: totalAmount,
-                avgPrice: newAvgPrice
-            };
+        const idx = newAssets.findIndex(a => a.id === coinId);
+        if (idx >= 0) {
+            const current = newAssets[idx];
+            const currentCost = current.amount * (current.avgPrice || current.current_price || price);
+            const newTotal = current.amount + parseFloat(amount);
+            const newAvg = (currentCost + total) / newTotal;
+            newAssets[idx] = { ...current, amount: newTotal, avgPrice: newAvg };
         } else {
-            newAssets.push({
-                id: coinId,
-                amount: parseFloat(amount),
-                avgPrice: price
-            });
+            newAssets.push({ id: coinId, amount: parseFloat(amount), avgPrice: price });
         }
-
-        const userRef = doc(db, "users", user.uid);
-        await updateDoc(userRef, {
-            balance: newBalance,
-            assets: newAssets
-        });
-
-        await logTransaction('buy', `Bought ${coinId} @ $${price.toLocaleString()}`, amount, coinId, price, totalCost);
-        toast.success("Purchase successful!");
+        await updateDoc(doc(db, "users", user.uid), { balance: newBalance, assets: newAssets });
+        await logTransaction('buy', `Bought ${coinId}`, amount, coinId, price, total);
+        toast.success("Buy order executed successfully");
     };
 
     const sellCoin = async (coinId, amount, price) => {
         if (!user) return;
         const asset = assets.find(a => a.id === coinId);
-
-        if (!asset || asset.amount < parseFloat(amount)) {
-            toast.error("You don't have enough coins to sell!");
-            return;
-        }
-
+        if (!asset || asset.amount < parseFloat(amount)) { toast.error("Insufficient assets"); return; }
         const earnings = amount * price;
         const newBalance = balance + earnings;
-         let newAssets = assets.map(item => {
-            if (item.id === coinId) {
-                return { ...item, amount: item.amount - parseFloat(amount) };
-            }
-            return item;
-        }).filter(item => item.amount > 0.00000001);
-
+        let newAssets = assets.map(item => item.id === coinId ? { ...item, amount: item.amount - parseFloat(amount) } : item).filter(i => i.amount > 0.00000001);
         await updateDoc(doc(db, "users", user.uid), { balance: newBalance, assets: newAssets });
-        await logTransaction('sell', `Sold ${coinId} @ $${price.toLocaleString()}`, amount, coinId, price, earnings);
-        toast.success("The sale transaction has been completed.");
+        await logTransaction('sell', `Sold ${coinId}`, amount, coinId, price, earnings);
+        toast.success("Sell order executed successfully");
+    };
+
+    const handleTransfer = async (targetId, amount, type = 'cash', coinId = null) => { 
+        const val = parseFloat(amount);
+        if (val <= 0) throw new Error("Invalid amount");
+        const senderRef = doc(db, "users", user.uid);
+        const receiverRef = doc(db, "users", targetId);
+        
+        await runTransaction(db, async (t) => {
+            const rDoc = await t.get(receiverRef);
+            if (!rDoc.exists()) throw "Receiver not found";
+            const sDoc = await t.get(senderRef);
+            const sData = sDoc.data();
+            const rData = rDoc.data();
+
+            if (type === 'cash') {
+                if (sData.balance < val) throw "Insufficient balance";
+                t.update(senderRef, { balance: sData.balance - val });
+                t.update(receiverRef, { balance: (rData.balance || 0) + val });
+            } else {
+                const sAssets = sData.assets || [];
+                const idx = sAssets.findIndex(a => a.id === coinId);
+                if (idx === -1 || sAssets[idx].amount < val) throw "Insufficient assets";
+                sAssets[idx].amount -= val;
+                const newSAssets = sAssets.filter(a => a.amount > 0.00000001);
+                
+                let rAssets = rData.assets || [];
+                const rIdx = rAssets.findIndex(a => a.id === coinId);
+                if (rIdx >= 0) rAssets[rIdx].amount += val;
+                else rAssets.push({ id: coinId, amount: val });
+                
+                t.update(senderRef, { assets: newSAssets });
+                t.update(receiverRef, { assets: rAssets });
+            }
+        });
+    };
+
+    const updateUserPortfolio = async (newAssets, newBalance, totalDust) => {
+        if (!user) return;
+        await updateDoc(doc(db, "users", user.uid), { assets: newAssets, balance: newBalance });
+        await logTransaction('dust', 'Converted dust', 1, 'mixed', totalDust, totalDust);
     };
 
     return (
         <CryptoContext.Provider value={{
             user, loading, signUp, login, logout,
             balance, setBalance, assets, setAssets,
-            buyCoin, sellCoin, userId,
-            handleTransfer, updateUserPortfolio,
-            transactions
+            buyCoin, sellCoin, userId, handleTransfer, updateUserPortfolio, transactions,
+            cryptoMasterList, 
+            isMasterLoading
         }}>
             {!loading && children}
         </CryptoContext.Provider>

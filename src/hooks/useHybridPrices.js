@@ -1,80 +1,74 @@
 import { useEffect, useState, useRef } from 'react';
 
-const GATE_PAIRS = [
-    "CRO_USDT", 
-    "KAS_USDT", 
-    "TON_USDT", 
-    "BONE_USDT",
-    "BRISE_USDT" 
-];
-
 const useHybridPrices = () => {
     const [prices, setPrices] = useState({});
-    const binanceWsRef = useRef(null);
-    const gateWsRef = useRef(null);
+    const binanceWs = useRef(null);
 
     useEffect(() => {
         const connectBinance = () => {
-            const ws = new WebSocket('wss://stream.binance.com:9443/ws/!miniTicker@arr');
-            binanceWsRef.current = ws;
+            if (binanceWs.current) return;
+            const ws = new WebSocket('wss://stream.binance.com:9443/ws/!ticker@arr');
+            binanceWs.current = ws;
 
             ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                const newPrices = {};
-                
-                data.forEach(ticker => {
-                    if (ticker.s.endsWith('USDT')) {
-                        const symbol = ticker.s.replace('USDT', '').toLowerCase(); 
-                        newPrices[symbol] = {
-                            price: parseFloat(ticker.c),
-                            change: parseFloat(ticker.P)
-                        };
-                    }
-                });
-                
-                setPrices(prev => ({ ...prev, ...newPrices }));
+                try {
+                    const data = JSON.parse(event.data);
+                    const updates = {};
+                    data.forEach(t => {
+                        if (t.s.endsWith('USDT')) {
+                            const symbol = t.s.replace('USDT', '').toLowerCase();
+                            updates[symbol] = {
+                                price: parseFloat(t.c),
+                                change: parseFloat(t.P),
+                                source: 'binance'
+                            };
+                        }
+                    });
+                    setPrices(prev => ({ ...prev, ...updates }));
+                } catch (e) {}
             };
         };
 
-        const connectGate = () => {
-            const ws = new WebSocket('wss://api.gateio.ws/ws/v4/');
-            gateWsRef.current = ws;
-
-            ws.onopen = () => {
-                const subscribeMsg = {
-                    "time": Date.now(),
-                    "channel": "spot.tickers",
-                    "event": "subscribe",
-                    "payload": GATE_PAIRS 
-                };
-                ws.send(JSON.stringify(subscribeMsg));
-            };
-
-            ws.onmessage = (event) => {
-                const response = JSON.parse(event.data);
+        const fetchAllGateTickers = async () => {
+            try {
+                const response = await fetch('/api-gate/api/v4/spot/tickers');
                 
-                if (response.event === 'update' && response.result) {
-                    const data = response.result;
-                    
-                    const symbol = data.currency_pair.replace('_USDT', '').toLowerCase();
-                    
-                    setPrices(prev => ({
-                        ...prev,
-                        [symbol]: {
-                            price: parseFloat(data.last),
-                            change: parseFloat(data.change_percentage) 
+                if (response.ok) {
+                    const data = await response.json();
+                    const updates = {};
+
+                    data.forEach(item => {
+                        if (item.currency_pair.endsWith('_USDT')) {
+                            const symbol = item.currency_pair.replace('_USDT', '').toLowerCase();
+                            updates[symbol] = {
+                                price: parseFloat(item.last),
+                                change: parseFloat(item.change_percentage),
+                                source: 'gate'
+                            };
                         }
-                    }));
+                    });
+
+                    setPrices(prev => {
+                        const newState = { ...prev };
+                        Object.keys(updates).forEach(key => {
+                            if (!newState[key] || newState[key].source !== 'binance') {
+                                newState[key] = updates[key];
+                            }
+                        });
+                        return newState;
+                    });
                 }
-            };
+            } catch (error) { }
         };
 
         connectBinance();
-        connectGate();
+        fetchAllGateTickers();
+
+        const intervalId = setInterval(fetchAllGateTickers, 2500);
 
         return () => {
-            if (binanceWsRef.current) binanceWsRef.current.close();
-            if (gateWsRef.current) gateWsRef.current.close();
+            if (binanceWs.current) { binanceWs.current.close(); binanceWs.current = null; }
+            clearInterval(intervalId);
         };
     }, []);
 
