@@ -4,10 +4,9 @@ import { useNavigate } from 'react-router-dom';
 import useHybridPrices from '../hooks/useHybridPrices';
 import { AiOutlineHistory, AiOutlineLogout } from 'react-icons/ai';
 import toast from 'react-hot-toast';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 const Portfolio = () => {
-    const { assets, balance, logout, userId, cryptoMasterList, handleTransfer, transactions } = useCrypto();
+    const { assets, balance, logout, userId, cryptoMasterList, handleTransfer } = useCrypto();
     const livePrices = useHybridPrices();
     const navigate = useNavigate();
 
@@ -46,33 +45,6 @@ const Portfolio = () => {
     const totalPnl = totalAssetValue - totalInvested;
     const totalPnlPercent = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0;
 
-    const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1'];
-    
-    const pieData = [
-        { name: 'Cash (USD)', value: balance, color: '#3b82f6' }, 
-        ...myAssets.map((asset, index) => ({
-            name: asset.symbol.toUpperCase(),
-            value: asset.totalValue,
-            color: COLORS[(index + 1) % COLORS.length] 
-        }))
-    ]
-    .filter(item => item.value > 1) 
-    .sort((a, b) => b.value - a.value); 
-
-    const CustomTooltip = ({ active, payload }) => {
-        if (active && payload && payload.length) {
-            return (
-                <div className="bg-slate-900 border border-slate-700 p-2 rounded-lg shadow-xl">
-                    <p className="text-white font-bold text-xs">{payload[0].name}</p>
-                    <p className="text-blue-400 text-xs font-mono">
-                        ${payload[0].value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </p>
-                </div>
-            );
-        }
-        return null;
-    };
-
     const handleLogout = async () => { try { await logout(); navigate('/login'); } catch (e) {} };
     const copyID = () => { navigator.clipboard.writeText(userId); toast.success("ID Copied"); };
     
@@ -98,7 +70,7 @@ const Portfolio = () => {
                 </div>
             </div>
 
-            <div className="bg-gradient-to-r from-blue-600 to-blue-800 p-6 rounded-2xl shadow-xl mb-6 text-white relative overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-blue-800 p-6 rounded-2xl shadow-xl mb-8 text-white relative overflow-hidden">
                 <div className="relative z-10">
                     <div className="flex justify-between items-start">
                         <div>
@@ -116,55 +88,19 @@ const Portfolio = () => {
                             </p>
                         </div>
                     </div>
-                    <div className="mt-6 flex justify-between text-sm opacity-90 font-medium">
+                    <div className="mt-6 flex flex-wrap gap-2 text-sm opacity-90 font-medium">
                         <span className="bg-blue-900/40 px-3 py-1 rounded-lg">Cash: ${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         <span className="bg-blue-900/40 px-3 py-1 rounded-lg">Assets: ${totalAssetValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     </div>
-                    <div className="flex gap-3 mt-6 pt-4 border-t border-white/20">
-                        <button onClick={() => setShowDeposit(true)} className="flex-1 bg-white/20 hover:bg-white/30 py-2.5 rounded-xl font-bold text-sm transition">Deposit</button>
-                        <button onClick={() => setShowWithdraw(true)} className="flex-1 bg-white/20 hover:bg-white/30 py-2.5 rounded-xl font-bold text-sm transition">Withdraw</button>
-                    </div>
                 </div>
+                
+                <div className="relative z-10 flex gap-3 mt-6 pt-4 border-t border-white/20">
+                    <button onClick={() => setShowDeposit(true)} className="flex-1 bg-white/20 hover:bg-white/30 py-2.5 rounded-xl font-bold text-sm transition">Deposit</button>
+                    <button onClick={() => setShowWithdraw(true)} className="flex-1 bg-white/20 hover:bg-white/30 py-2.5 rounded-xl font-bold text-sm transition">Withdraw</button>
+                </div>
+                
                 <div className="absolute -bottom-10 -right-10 w-48 h-48 bg-white/10 rounded-full blur-3xl"></div>
             </div>
-
-            {pieData.length > 0 && (
-                <div className="bg-slate-800 rounded-2xl p-4 mb-6 border border-slate-700 shadow-lg">
-                    <h3 className="text-white font-bold text-sm mb-4 flex items-center gap-2">
-                        <span className="w-1 h-4 bg-blue-500 rounded-full"></span>
-                        Allocation
-                    </h3>
-                    <div className="h-[200px] w-full flex items-center justify-center">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie
-                                    data={pieData}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={80}
-                                    paddingAngle={5}
-                                    dataKey="value"
-                                    stroke="none"
-                                >
-                                    {pieData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={entry.color} />
-                                    ))}
-                                </Pie>
-                                <Tooltip content={<CustomTooltip />} />
-                                <Legend 
-                                    verticalAlign="middle" 
-                                    align="right" 
-                                    layout="vertical"
-                                    iconType="circle"
-                                    iconSize={8}
-                                    wrapperStyle={{ fontSize: '10px', color: '#94a3b8' }}
-                                />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
-            )}
 
             <h3 className="text-white font-bold text-sm mb-3 pl-1">Your Assets</h3>
             <div className="space-y-4">
