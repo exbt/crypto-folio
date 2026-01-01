@@ -1,22 +1,37 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useCrypto } from '../context/CryptoContext';
 import { useNavigate } from 'react-router-dom';
 import useHybridPrices from '../hooks/useHybridPrices';
-import { AiOutlineHistory, AiOutlineLogout } from 'react-icons/ai';
+import { AiOutlineHistory, AiOutlineLogout, AiOutlineUser, AiOutlineSetting, AiOutlineCaretDown } from 'react-icons/ai';
 import toast from 'react-hot-toast';
 
 const Portfolio = () => {
-    const { assets, balance, logout, userId, cryptoMasterList, handleTransfer } = useCrypto();
+    const { user, assets, balance, logout, userId, cryptoMasterList, handleTransfer } = useCrypto();
     const livePrices = useHybridPrices();
     const navigate = useNavigate();
+
 
     const [showDeposit, setShowDeposit] = useState(false);
     const [showWithdraw, setShowWithdraw] = useState(false);
     
+
+    const [showProfileMenu, setShowProfileMenu] = useState(false);
+    const menuRef = useRef(null); 
+
     const [targetId, setTargetId] = useState("");
     const [amount, setAmount] = useState("");
     const [type, setType] = useState("cash");
     const [selectedCoin, setSelectedCoin] = useState("");
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (menuRef.current && !menuRef.current.contains(event.target)) {
+                setShowProfileMenu(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
 
     let totalInvested = 0;
 
@@ -60,13 +75,52 @@ const Portfolio = () => {
         <div className="p-4 pb-24 relative max-w-4xl mx-auto">
             <div className="flex justify-between items-center mb-6">
                 <h1 className="text-2xl font-bold text-white">Portfolio</h1>
-                <div className="flex gap-2">
-                    <button onClick={() => navigate('/transactions')} className="bg-slate-800 text-gray-300 p-2 rounded-lg hover:text-white hover:bg-slate-700 transition">
+                
+                <div className="flex items-center gap-3">
+                    <button onClick={() => navigate('/transactions')} className="bg-slate-800 text-gray-300 p-2.5 rounded-full hover:text-white hover:bg-slate-700 transition border border-slate-700">
                         <AiOutlineHistory size={20} />
                     </button>
-                    <button onClick={handleLogout} className="bg-red-500/20 text-red-400 p-2 rounded-lg hover:bg-red-500 hover:text-white transition">
-                        <AiOutlineLogout size={20} />
-                    </button>
+
+                    <div className="relative" ref={menuRef}>
+                        <button 
+                            onClick={() => setShowProfileMenu(!showProfileMenu)} 
+                            className={`flex items-center gap-2 pl-1 pr-3 py-1 rounded-full transition border ${showProfileMenu ? 'bg-slate-700 border-blue-500' : 'bg-slate-800 border-slate-700 hover:border-slate-500'}`}
+                        >
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-xs shadow-lg">
+                                {user?.email ? user.email[0].toUpperCase() : <AiOutlineUser />}
+                            </div>
+                            <span className="text-sm font-bold text-white hidden sm:block">Profile</span>
+                            <AiOutlineCaretDown size={10} className={`text-gray-400 transition-transform duration-200 ${showProfileMenu ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {showProfileMenu && (
+                            <div className="absolute right-0 top-12 w-56 bg-slate-800 rounded-xl shadow-2xl border border-slate-700 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <div className="p-4 border-b border-slate-700 bg-slate-800/50">
+                                    <p className="text-white text-sm font-bold truncate">{user?.email}</p>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <span className="text-[10px] text-gray-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-700 font-mono">
+                                            UID: {userId.substring(0, 6)}...
+                                        </span>
+                                        <button onClick={copyID} className="text-[10px] text-blue-400 hover:underline">Copy</button>
+                                    </div>
+                                </div>
+
+                                <div className="p-1.5">
+                                    <button onClick={() => toast("Settings coming soon!")} className="w-full text-left flex items-center gap-3 p-3 rounded-lg text-gray-300 hover:bg-slate-700 hover:text-white transition group">
+                                        <AiOutlineSetting className="group-hover:rotate-90 transition duration-300" /> 
+                                        <span className="text-sm font-medium">Settings</span>
+                                    </button>
+                                    
+                                    <div className="h-px bg-slate-700/50 my-1 mx-2"></div>
+                                    
+                                    <button onClick={handleLogout} className="w-full text-left flex items-center gap-3 p-3 rounded-lg text-red-400 hover:bg-red-500/10 hover:text-red-300 transition">
+                                        <AiOutlineLogout /> 
+                                        <span className="text-sm font-medium">Logout</span>
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
 
