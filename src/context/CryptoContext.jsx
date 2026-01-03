@@ -1,7 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from "react";
 import { auth, db } from "../firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, updatePassword } from "firebase/auth";
-import { doc, setDoc, updateDoc, onSnapshot, collection, addDoc, query, orderBy, serverTimestamp, runTransaction, getDoc } from "firebase/firestore";
+import { doc, setDoc, updateDoc, onSnapshot, collection, addDoc, query, orderBy, serverTimestamp, runTransaction, getDoc, arrayUnion, arrayRemove } from "firebase/firestore";
 import toast from 'react-hot-toast';
 import { getMarketData } from '../services/api';
 import QRCode from 'qrcode';
@@ -13,9 +13,12 @@ export const CryptoProvider = ({ children }) => {
     const [userData, setUserData] = useState(null);
     const [balance, setBalance] = useState(0);
     const [assets, setAssets] = useState([]);
+    const [watchlist, setWatchlist] = useState([]); 
     const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [userId, setUserId] = useState("");
+
+    const [is2FAVerifiedSession, setIs2FAVerifiedSession] = useState(false);
 
     const [cryptoMasterList, setCryptoMasterList] = useState([]);
     const [isMasterLoading, setIsMasterLoading] = useState(true);
@@ -48,6 +51,7 @@ export const CryptoProvider = ({ children }) => {
         loadMasterData();
     }, []);
 
+
     useEffect(() => {
         const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
             setUser(currentUser);
@@ -55,21 +59,34 @@ export const CryptoProvider = ({ children }) => {
             if (currentUser) {
                 setUserId(currentUser.uid);
                 const userRef = doc(db, "users", currentUser.uid);
-                
+
                 const unsubscribeSnapshot = onSnapshot(userRef, (d) => {
                     if (d.exists()) {
                         const data = d.data();
                         setUserData(data);
                         setBalance(data.balance);
                         setAssets(data.assets || []);
+                        setWatchlist(data.watchlist || []); 
+                        
+                        if (data.is2FAEnabled === false) {
+                            setIs2FAVerifiedSession(true);
+                        }
                     }
                 });
                 
                 const q = query(collection(db, "users", currentUser.uid, "transactions"), orderBy("date", "desc"));
                 const unsubscribeHistory = onSnapshot(q, (s) => setTransactions(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+                
                 return () => { unsubscribeSnapshot(); unsubscribeHistory(); };
             } else {
-                setBalance(0); setAssets([]); setTransactions([]); setUserId(""); setUserData(null);
+
+                setBalance(0); 
+                setAssets([]); 
+                setWatchlist([]); 
+                setTransactions([]); 
+                setUserId(""); 
+                setUserData(null); 
+                setIs2FAVerifiedSession(false);
             }
         });
         return () => unsubscribeAuth();
@@ -81,7 +98,8 @@ export const CryptoProvider = ({ children }) => {
         await setDoc(doc(db, "users", r.user.uid), { 
             uid: r.user.uid, 
             balance: 10000, 
-            assets: [], 
+            assets: [],
+            watchlist: [], 
             email,
             displayName: defaultName,
             is2FAEnabled: false 
@@ -92,12 +110,6 @@ export const CryptoProvider = ({ children }) => {
     const login = (email, password) => signInWithEmailAndPassword(auth, email, password);
     const logout = () => signOut(auth);
     
-    const logTransactionInternal = async (uid, type, desc, amount, coinId, exPrice, totalVal, targetId = null) => { 
-        await addDoc(collection(db, "users", uid, "transactions"), { 
-            type, description: desc, amount: parseFloat(amount), coinId: coinId || 'USD', executionPrice: parseFloat(exPrice), totalValue: parseFloat(totalVal), targetId: targetId, date: serverTimestamp() 
-        }); 
-    };
-
     const updateUserName = async (newName) => {
         if (!user) return;
         await updateDoc(doc(db, "users", user.uid), { displayName: newName });
@@ -115,6 +127,32 @@ export const CryptoProvider = ({ children }) => {
         }
     };
 
+    const logTransactionInternal = async (uid, type, desc, amount, coinId, exPrice, totalVal, targetId = null) => { 
+        await addDoc(collection(db, "users", uid, "transactions"), { 
+            type, 
+            description: desc, 
+            amount: parseFloat(amount), 
+            coinId: coinId || 'USD', 
+            executionPrice: parseFloat(exPrice), 
+            totalValue: parseFloat(totalVal), 
+            targetId: targetId, 
+            date: serverTimestamp() 
+        }); 
+    };
+
+    const toggleWatchlist = async (coinId) => {
+        if (!user) return;
+        const userRef = doc(db, "users", user.uid);
+        
+        if (watchlist.includes(coinId)) {
+            await updateDoc(userRef, { watchlist: arrayRemove(coinId) });
+            toast.success("Removed from Watchlist");
+        } else {
+            await updateDoc(userRef, { watchlist: arrayUnion(coinId) });
+            toast.success("Added to Watchlist");
+        }
+    };
+    
     const generateBase32Secret = () => {
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
         let secret = '';
@@ -169,13 +207,14 @@ export const CryptoProvider = ({ children }) => {
         } catch (e) { console.error("TOTP Error:", e); return false; }
     };
 
+    
     const generate2FA = async () => {
         if (!user) return;
         const secret = generateBase32Secret();
         const recoveryKey = generateRecoveryKey(); 
         
-        const label = `CryptoApp:${user.email}`;
-        const otpauth = `otpauth://totp/${label}?secret=${secret}&issuer=CryptoApp`;
+        const label = `crypto-folio:${user.email}`;
+        const otpauth = `otpauth://totp/${label}?secret=${secret}&issuer=crypto-folio`;
         const imageUrl = await QRCode.toDataURL(otpauth); 
         
         return { secret, imageUrl, recoveryKey };
@@ -191,6 +230,7 @@ export const CryptoProvider = ({ children }) => {
                 recoveryKey: recoveryKey, 
                 is2FAEnabled: true 
             });
+            setIs2FAVerifiedSession(true);
             toast.success("2FA Enabled Successfully");
             return true;
         } else {
@@ -198,9 +238,9 @@ export const CryptoProvider = ({ children }) => {
             return false;
         }
     };
+
     const disable2FA = async (token) => {
         if (!user || !userData?.twoFactorSecret) return false;
-        
         const cleanToken = token.replace(/\s/g, ''); 
         const isValid = await verifyTOTP(cleanToken, userData.twoFactorSecret);
 
@@ -210,6 +250,7 @@ export const CryptoProvider = ({ children }) => {
                 recoveryKey: null,
                 is2FAEnabled: false 
             });
+            setIs2FAVerifiedSession(true); 
             toast.success("2FA Disabled");
             return true;
         } else {
@@ -234,7 +275,7 @@ export const CryptoProvider = ({ children }) => {
             return false;
         } catch (e) { console.error("Recovery Error:", e); toast.error("System Error"); return false; }
     };
-
+    
     const checkUser2FAStatus = async (uid) => {
         try {
             const docSnap = await getDoc(doc(db, "users", uid));
@@ -261,6 +302,10 @@ export const CryptoProvider = ({ children }) => {
         if (!userData || !userData.is2FAEnabled || !userData.twoFactorSecret) return true;
         const cleanToken = token.replace(/\s/g, '');
         return await verifyTOTP(cleanToken, userData.twoFactorSecret);
+    };
+
+    const confirmSession = () => {
+        setIs2FAVerifiedSession(true);
     };
 
     const buyCoin = async (coinId, amount, price) => {
@@ -343,13 +388,15 @@ export const CryptoProvider = ({ children }) => {
 
     return (
         <CryptoContext.Provider value={{
-            user, userData, loading, signUp, login, logout,
-            balance, setBalance, assets, setAssets,
-            buyCoin, sellCoin, userId, handleTransfer, updateUserPortfolio, transactions,
+            user, userData, loading, userId,
+            balance, assets, watchlist, transactions,
             cryptoMasterList, isMasterLoading,
-            updateUserName, changePassword, generate2FA, enable2FA, disable2FA,
-            verifyStoredCode, checkUser2FAStatus, verifyLogin2FA,
-            reset2FAWithRecovery
+            signUp, login, logout, updateUserName, changePassword,
+            toggleWatchlist,
+            buyCoin, sellCoin, handleTransfer, updateUserPortfolio,        
+            generate2FA, enable2FA, disable2FA, 
+            verifyStoredCode, checkUser2FAStatus, verifyLogin2FA, reset2FAWithRecovery,
+            is2FAVerifiedSession, confirmSession
         }}>
             {!loading && children}
         </CryptoContext.Provider>
