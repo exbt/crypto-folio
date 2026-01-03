@@ -1,14 +1,16 @@
 import React, { createContext, useState, useContext, useEffect } from "react";
 import { auth, db } from "../firebase";
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc, updateDoc, onSnapshot, collection, addDoc, query, orderBy, serverTimestamp, runTransaction } from "firebase/firestore";
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, updatePassword } from "firebase/auth";
+import { doc, setDoc, updateDoc, onSnapshot, collection, addDoc, query, orderBy, serverTimestamp, runTransaction, getDoc } from "firebase/firestore";
 import toast from 'react-hot-toast';
 import { getMarketData } from '../services/api';
+import QRCode from 'qrcode';
 
 const CryptoContext = createContext();
 
 export const CryptoProvider = ({ children }) => {
     const [user, setUser] = useState(null);
+    const [userData, setUserData] = useState(null);
     const [balance, setBalance] = useState(0);
     const [assets, setAssets] = useState([]);
     const [transactions, setTransactions] = useState([]);
@@ -22,7 +24,6 @@ export const CryptoProvider = ({ children }) => {
         const loadMasterData = async () => {
             const cachedData = localStorage.getItem("cryptoMasterList");
             const cachedTime = localStorage.getItem("cryptoMasterListTime");
-            
             const ONE_DAY = 24 * 60 * 60 * 1000;
             const now = Date.now();
 
@@ -54,37 +55,212 @@ export const CryptoProvider = ({ children }) => {
             if (currentUser) {
                 setUserId(currentUser.uid);
                 const userRef = doc(db, "users", currentUser.uid);
+                
                 const unsubscribeSnapshot = onSnapshot(userRef, (d) => {
                     if (d.exists()) {
-                        setBalance(d.data().balance);
-                        setAssets(d.data().assets || []);
+                        const data = d.data();
+                        setUserData(data);
+                        setBalance(data.balance);
+                        setAssets(data.assets || []);
                     }
                 });
+                
                 const q = query(collection(db, "users", currentUser.uid, "transactions"), orderBy("date", "desc"));
                 const unsubscribeHistory = onSnapshot(q, (s) => setTransactions(s.docs.map(d => ({ id: d.id, ...d.data() }))));
                 return () => { unsubscribeSnapshot(); unsubscribeHistory(); };
             } else {
-                setBalance(0); setAssets([]); setTransactions([]); setUserId("");
+                setBalance(0); setAssets([]); setTransactions([]); setUserId(""); setUserData(null);
             }
         });
         return () => unsubscribeAuth();
     }, []);
 
-    const signUp = async (email, password) => { const r = await createUserWithEmailAndPassword(auth, email, password); await setDoc(doc(db, "users", r.user.uid), { uid: r.user.uid, balance: 10000, assets: [], email }); return r.user; };
+    const signUp = async (email, password) => { 
+        const r = await createUserWithEmailAndPassword(auth, email, password); 
+        const defaultName = email.split('@')[0];
+        await setDoc(doc(db, "users", r.user.uid), { 
+            uid: r.user.uid, 
+            balance: 10000, 
+            assets: [], 
+            email,
+            displayName: defaultName,
+            is2FAEnabled: false 
+        }); 
+        return r.user; 
+    };
+
     const login = (email, password) => signInWithEmailAndPassword(auth, email, password);
     const logout = () => signOut(auth);
     
     const logTransactionInternal = async (uid, type, desc, amount, coinId, exPrice, totalVal, targetId = null) => { 
         await addDoc(collection(db, "users", uid, "transactions"), { 
-            type, 
-            description: desc, 
-            amount: parseFloat(amount), 
-            coinId: coinId || 'USD', 
-            executionPrice: parseFloat(exPrice), 
-            totalValue: parseFloat(totalVal), 
-            targetId: targetId, 
-            date: serverTimestamp() 
+            type, description: desc, amount: parseFloat(amount), coinId: coinId || 'USD', executionPrice: parseFloat(exPrice), totalValue: parseFloat(totalVal), targetId: targetId, date: serverTimestamp() 
         }); 
+    };
+
+    const updateUserName = async (newName) => {
+        if (!user) return;
+        await updateDoc(doc(db, "users", user.uid), { displayName: newName });
+        toast.success("Profile updated");
+    };
+
+    const changePassword = async (newPassword) => {
+        if (!user) return;
+        try {
+            await updatePassword(user, newPassword);
+            toast.success("Password updated successfully");
+        } catch (error) {
+            console.error(error);
+            toast.error("Error: Please re-login and try again.");
+        }
+    };
+
+    const generateBase32Secret = () => {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+        let secret = '';
+        const array = new Uint8Array(20);
+        window.crypto.getRandomValues(array);
+        for (let i = 0; i < array.length; i++) { secret += chars[array[i] % 32]; }
+        return secret;
+    };
+
+    const generateRecoveryKey = () => {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; 
+        let key = '';
+        const array = new Uint8Array(32); 
+        window.crypto.getRandomValues(array);
+        for (let i = 0; i < array.length; i++) { key += chars[array[i] % chars.length]; }
+        return key;
+    };
+
+    const base32ToUint8Array = (str) => {
+        const base32chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+        let bits = 0, value = 0, index = 0;
+        const output = new Uint8Array((str.length * 5) / 8);
+        for (let i = 0; i < str.length; i++) {
+            value = (value << 5) | base32chars.indexOf(str[i].toUpperCase());
+            bits += 5;
+            if (bits >= 8) { output[index++] = (value >>> (bits - 8)) & 0xff; bits -= 8; }
+        }
+        return output;
+    };
+
+    const verifyTOTP = async (token, secret) => {
+        try {
+            const keyBytes = base32ToUint8Array(secret);
+            const key = await window.crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+            const epoch = Math.floor(Date.now() / 1000.0);
+            const currentCounter = Math.floor(epoch / 30);
+            
+            for (let i = -1; i <= 1; i++) {
+                const counter = currentCounter + i;
+                const counterBuffer = new ArrayBuffer(8);
+                const view = new DataView(counterBuffer);
+                view.setUint32(0, 0, false);
+                view.setUint32(4, counter, false);
+                const signature = await window.crypto.subtle.sign("HMAC", key, counterBuffer);
+                const sigBytes = new Uint8Array(signature);
+                const offset = sigBytes[sigBytes.length - 1] & 0xf;
+                const binary = ((sigBytes[offset] & 0x7f) << 24) | ((sigBytes[offset + 1] & 0xff) << 16) | ((sigBytes[offset + 2] & 0xff) << 8) | (sigBytes[offset + 3] & 0xff);
+                const otp = (binary % 1000000).toString().padStart(6, '0');
+                if (otp === token) return true;
+            }
+            return false;
+        } catch (e) { console.error("TOTP Error:", e); return false; }
+    };
+
+    const generate2FA = async () => {
+        if (!user) return;
+        const secret = generateBase32Secret();
+        const recoveryKey = generateRecoveryKey(); 
+        
+        const label = `CryptoApp:${user.email}`;
+        const otpauth = `otpauth://totp/${label}?secret=${secret}&issuer=CryptoApp`;
+        const imageUrl = await QRCode.toDataURL(otpauth); 
+        
+        return { secret, imageUrl, recoveryKey };
+    };
+
+    const enable2FA = async (token, secret, recoveryKey) => {
+        if (!user) return;
+        const cleanToken = token.replace(/\s/g, ''); 
+        const isValid = await verifyTOTP(cleanToken, secret);
+        if (isValid) {
+            await updateDoc(doc(db, "users", user.uid), { 
+                twoFactorSecret: secret, 
+                recoveryKey: recoveryKey, 
+                is2FAEnabled: true 
+            });
+            toast.success("2FA Enabled Successfully");
+            return true;
+        } else {
+            toast.error("Invalid Code");
+            return false;
+        }
+    };
+    const disable2FA = async (token) => {
+        if (!user || !userData?.twoFactorSecret) return false;
+        
+        const cleanToken = token.replace(/\s/g, ''); 
+        const isValid = await verifyTOTP(cleanToken, userData.twoFactorSecret);
+
+        if (isValid) {
+            await updateDoc(doc(db, "users", user.uid), { 
+                twoFactorSecret: null, 
+                recoveryKey: null,
+                is2FAEnabled: false 
+            });
+            toast.success("2FA Disabled");
+            return true;
+        } else {
+            toast.error("Invalid Code");
+            return false;
+        }
+    };
+
+    const reset2FAWithRecovery = async (uid, inputKey) => {
+        try {
+            const docRef = doc(db, "users", uid);
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                if (data.recoveryKey === inputKey) {
+                    await updateDoc(docRef, { twoFactorSecret: null, recoveryKey: null, is2FAEnabled: false });
+                    toast.success("Recovery Successful. 2FA Disabled.");
+                    return true;
+                }
+            }
+            toast.error("Invalid Recovery Key");
+            return false;
+        } catch (e) { console.error("Recovery Error:", e); toast.error("System Error"); return false; }
+    };
+
+    const checkUser2FAStatus = async (uid) => {
+        try {
+            const docSnap = await getDoc(doc(db, "users", uid));
+            if (docSnap.exists()) { return docSnap.data().is2FAEnabled || false; }
+            return false;
+        } catch (e) { return false; }
+    };
+
+    const verifyLogin2FA = async (uid, token) => {
+        try {
+            const docSnap = await getDoc(doc(db, "users", uid));
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                if (data.is2FAEnabled && data.twoFactorSecret) {
+                    const cleanToken = token.replace(/\s/g, '');
+                    return await verifyTOTP(cleanToken, data.twoFactorSecret);
+                }
+            }
+            return true;
+        } catch (e) { return false; }
+    };
+    
+    const verifyStoredCode = async (token) => {
+        if (!userData || !userData.is2FAEnabled || !userData.twoFactorSecret) return true;
+        const cleanToken = token.replace(/\s/g, '');
+        return await verifyTOTP(cleanToken, userData.twoFactorSecret);
     };
 
     const buyCoin = async (coinId, amount, price) => {
@@ -155,9 +331,7 @@ export const CryptoProvider = ({ children }) => {
         });
 
         const assetName = type === 'cash' ? 'USD' : coinId;
-        
         await logTransactionInternal(user.uid, 'withdraw', `Sent to ${targetId}`, val, assetName, 0, val, targetId);
-        
         await logTransactionInternal(targetId, 'deposit', `Received from ${user.uid}`, val, assetName, 0, val, user.uid);
     };
 
@@ -169,10 +343,13 @@ export const CryptoProvider = ({ children }) => {
 
     return (
         <CryptoContext.Provider value={{
-            user, loading, signUp, login, logout,
+            user, userData, loading, signUp, login, logout,
             balance, setBalance, assets, setAssets,
             buyCoin, sellCoin, userId, handleTransfer, updateUserPortfolio, transactions,
-            cryptoMasterList, isMasterLoading
+            cryptoMasterList, isMasterLoading,
+            updateUserName, changePassword, generate2FA, enable2FA, disable2FA,
+            verifyStoredCode, checkUser2FAStatus, verifyLogin2FA,
+            reset2FAWithRecovery
         }}>
             {!loading && children}
         </CryptoContext.Provider>
