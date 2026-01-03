@@ -13,7 +13,8 @@ export const CryptoProvider = ({ children }) => {
     const [userData, setUserData] = useState(null);
     const [balance, setBalance] = useState(0);
     const [assets, setAssets] = useState([]);
-    const [watchlist, setWatchlist] = useState([]); 
+    const [watchlist, setWatchlist] = useState([]);
+    const [contacts, setContacts] = useState([]);
     const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [userId, setUserId] = useState("");
@@ -51,7 +52,6 @@ export const CryptoProvider = ({ children }) => {
         loadMasterData();
     }, []);
 
-
     useEffect(() => {
         const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
             setUser(currentUser);
@@ -66,7 +66,8 @@ export const CryptoProvider = ({ children }) => {
                         setUserData(data);
                         setBalance(data.balance);
                         setAssets(data.assets || []);
-                        setWatchlist(data.watchlist || []); 
+                        setWatchlist(data.watchlist || []);
+                        setContacts(data.contacts || []);
                         
                         if (data.is2FAEnabled === false) {
                             setIs2FAVerifiedSession(true);
@@ -79,10 +80,10 @@ export const CryptoProvider = ({ children }) => {
                 
                 return () => { unsubscribeSnapshot(); unsubscribeHistory(); };
             } else {
-
                 setBalance(0); 
                 setAssets([]); 
                 setWatchlist([]); 
+                setContacts([]); 
                 setTransactions([]); 
                 setUserId(""); 
                 setUserData(null); 
@@ -100,6 +101,7 @@ export const CryptoProvider = ({ children }) => {
             balance: 10000, 
             assets: [],
             watchlist: [], 
+            contacts: [],
             email,
             displayName: defaultName,
             is2FAEnabled: false 
@@ -143,7 +145,6 @@ export const CryptoProvider = ({ children }) => {
     const toggleWatchlist = async (coinId) => {
         if (!user) return;
         const userRef = doc(db, "users", user.uid);
-        
         if (watchlist.includes(coinId)) {
             await updateDoc(userRef, { watchlist: arrayRemove(coinId) });
             toast.success("Removed from Watchlist");
@@ -152,7 +153,7 @@ export const CryptoProvider = ({ children }) => {
             toast.success("Added to Watchlist");
         }
     };
-    
+
     const generateBase32Secret = () => {
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
         let secret = '';
@@ -207,16 +208,13 @@ export const CryptoProvider = ({ children }) => {
         } catch (e) { console.error("TOTP Error:", e); return false; }
     };
 
-    
     const generate2FA = async () => {
         if (!user) return;
         const secret = generateBase32Secret();
         const recoveryKey = generateRecoveryKey(); 
-        
         const label = `crypto-folio:${user.email}`;
         const otpauth = `otpauth://totp/${label}?secret=${secret}&issuer=crypto-folio`;
         const imageUrl = await QRCode.toDataURL(otpauth); 
-        
         return { secret, imageUrl, recoveryKey };
     };
 
@@ -308,6 +306,37 @@ export const CryptoProvider = ({ children }) => {
         setIs2FAVerifiedSession(true);
     };
 
+    const addContact = async (name, contactUid, token) => {
+        if (!user || !userData) return;
+        if (!userData.is2FAEnabled || !userData.twoFactorSecret) {
+            toast.error("Enable 2FA first to add contacts!");
+            return false;
+        }
+        const cleanToken = token.replace(/\s/g, '');
+        const isValid = await verifyTOTP(cleanToken, userData.twoFactorSecret);
+        if (!isValid) {
+            toast.error("Invalid 2FA Code");
+            return false;
+        }
+        const newContact = { name, uid: contactUid };
+        const userRef = doc(db, "users", user.uid);
+        const exists = contacts.some(c => c.uid === contactUid);
+        if (exists) {
+            toast.error("Contact already exists");
+            return true; 
+        }
+        await updateDoc(userRef, { contacts: arrayUnion(newContact) });
+        toast.success("Contact Added");
+        return true;
+    };
+
+    const deleteContact = async (contact) => {
+        if (!user) return;
+        const userRef = doc(db, "users", user.uid);
+        await updateDoc(userRef, { contacts: arrayRemove(contact) });
+        toast.success("Contact Removed");
+    };
+
     const buyCoin = async (coinId, amount, price) => {
         if (!user) return;
         const total = amount * price;
@@ -389,10 +418,10 @@ export const CryptoProvider = ({ children }) => {
     return (
         <CryptoContext.Provider value={{
             user, userData, loading, userId,
-            balance, assets, watchlist, transactions,
+            balance, assets, watchlist, contacts, transactions,
             cryptoMasterList, isMasterLoading,
             signUp, login, logout, updateUserName, changePassword,
-            toggleWatchlist,
+            toggleWatchlist, addContact, deleteContact,
             buyCoin, sellCoin, handleTransfer, updateUserPortfolio,        
             generate2FA, enable2FA, disable2FA, 
             verifyStoredCode, checkUser2FAStatus, verifyLogin2FA, reset2FAWithRecovery,

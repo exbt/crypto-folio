@@ -2,11 +2,22 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useCrypto } from '../context/CryptoContext';
 import { useNavigate } from 'react-router-dom';
 import useHybridPrices from '../hooks/useHybridPrices';
-import { AiOutlineHistory, AiOutlineLogout, AiOutlineSetting, AiOutlineCaretDown, AiOutlineClose, AiOutlineSave, AiOutlineLock, AiOutlineQrcode, AiOutlineCheck, AiOutlineUser, AiOutlineSafety, AiOutlineCopy, AiOutlineWarning } from 'react-icons/ai';
+import { 
+    AiOutlineHistory, AiOutlineLogout, AiOutlineSetting, AiOutlineCaretDown, 
+    AiOutlineClose, AiOutlineSave, AiOutlineLock, AiOutlineQrcode, 
+    AiOutlineCheck, AiOutlineUser, AiOutlineSafety, AiOutlineCopy, 
+    AiOutlineWarning, AiOutlineBook, AiOutlinePlus, AiOutlineDelete 
+} from 'react-icons/ai';
 import toast from 'react-hot-toast';
 
 const Portfolio = () => {
-    const { user, userData, assets, balance, logout, userId, cryptoMasterList, handleTransfer, updateUserName, changePassword, generate2FA, enable2FA, disable2FA, verifyStoredCode } = useCrypto();
+    const { 
+        user, userData, assets, balance, logout, userId, cryptoMasterList, 
+        handleTransfer, updateUserName, changePassword, 
+        generate2FA, enable2FA, disable2FA, verifyStoredCode, 
+        contacts, addContact, deleteContact 
+    } = useCrypto();
+    
     const livePrices = useHybridPrices();
     const navigate = useNavigate();
 
@@ -15,10 +26,13 @@ const Portfolio = () => {
     const [showSettings, setShowSettings] = useState(false);
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     
+    const [showAddressBook, setShowAddressBook] = useState(false);
+    const [showAddContact, setShowAddContact] = useState(false);
+    
     const [showTransfer2FA, setShowTransfer2FA] = useState(false); 
-    const [verifyCodeInput, setVerifyCodeInput] = useState("");
-
     const [showDisable2FAModal, setShowDisable2FAModal] = useState(false);
+    
+    const [verifyCodeInput, setVerifyCodeInput] = useState("");
     const [disableCode, setDisableCode] = useState("");
 
     const menuRef = useRef(null);
@@ -26,6 +40,10 @@ const Portfolio = () => {
     const [newName, setNewName] = useState("");
     const [newPass, setNewPass] = useState("");
     
+    const [contactName, setContactName] = useState("");
+    const [contactUid, setContactUid] = useState("");
+    const [contact2FA, setContact2FA] = useState("");
+
     const [qrCodeUrl, setQrCodeUrl] = useState(null);
     const [tempSecret, setTempSecret] = useState(null);
     const [tempRecoveryKey, setTempRecoveryKey] = useState(null); 
@@ -35,6 +53,15 @@ const Portfolio = () => {
     const [amount, setAmount] = useState("");
     const [type, setType] = useState("cash");
     const [selectedCoin, setSelectedCoin] = useState("");
+
+    useEffect(() => {
+        if (showDeposit || showWithdraw || showSettings || showTransfer2FA || showDisable2FAModal || showAddressBook || showAddContact) {
+            document.body.style.overflow = 'hidden';
+        } else {
+            document.body.style.overflow = 'unset';
+        }
+        return () => { document.body.style.overflow = 'unset'; }
+    }, [showDeposit, showWithdraw, showSettings, showTransfer2FA, showDisable2FAModal, showAddressBook, showAddContact]);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -80,8 +107,42 @@ const Portfolio = () => {
     const handleLogout = async () => { try { await logout(); navigate('/login'); } catch (e) {} };
     const copyID = () => { navigator.clipboard.writeText(userId); toast.success("ID Copied"); };
 
+    const getMaxBalance = () => {
+        if (type === 'cash') {
+            return balance;
+        } else {
+            if (!selectedCoin) return 0;
+            const asset = assets.find(a => a.id === selectedCoin);
+            return asset ? asset.amount : 0;
+        }
+    };
+
+    const maxBalance = getMaxBalance();
+
+    const handleAmountChange = (e) => {
+        let val = e.target.value;
+        
+        if (val === '' || parseFloat(val) < 0) {
+            setAmount(val);
+            return;
+        }
+
+        const numVal = parseFloat(val);
+        if (numVal > maxBalance) {
+            setAmount(maxBalance);
+            toast.error(`Max available: ${maxBalance.toFixed(4)}`);
+        } else {
+            setAmount(val);
+        }
+    };
+
     const handleWithdrawSubmit = async (e) => {
         e.preventDefault();
+        if (parseFloat(amount) > maxBalance) {
+            toast.error("Insufficient balance");
+            return;
+        }
+
         if (userData?.is2FAEnabled) {
             setShowWithdraw(false); 
             setShowTransfer2FA(true); 
@@ -97,6 +158,7 @@ const Portfolio = () => {
             setShowWithdraw(false);
             setShowTransfer2FA(false);
             setVerifyCodeInput("");
+            setAmount(""); 
         } catch (err) { toast.error(typeof err === 'string' ? err : "Error"); }
     };
 
@@ -109,28 +171,48 @@ const Portfolio = () => {
         }
     };
 
+    const handleAddContactClick = () => {
+        if (!userData.is2FAEnabled) {
+            toast.error("Enable 2FA to add contacts!");
+            setShowAddressBook(false);
+            setShowWithdraw(false);
+            setShowSettings(true);
+            setSettingsTab('security');
+        } else {
+            setShowAddContact(true);
+        }
+    };
+
+    const handleSaveContact = async () => {
+        if (!contactName || !contactUid || !contact2FA) {
+            toast.error("All fields required");
+            return;
+        }
+        const success = await addContact(contactName, contactUid, contact2FA);
+        if (success) {
+            setContactName(""); setContactUid(""); setContact2FA("");
+            setShowAddContact(false);
+        }
+    };
+
+    const selectContact = (uid) => {
+        setTargetId(uid);
+        setShowAddressBook(false);
+    };
+
     const handleConfirmDisable2FA = async () => {
         const success = await disable2FA(disableCode);
-        if (success) {
-            setShowDisable2FAModal(false);
-            setDisableCode("");
-        }
+        if (success) { setShowDisable2FAModal(false); setDisableCode(""); }
     };
 
     const handleStart2FA = async () => {
         const res = await generate2FA();
-        setTempSecret(res.secret);
-        setQrCodeUrl(res.imageUrl);
-        setTempRecoveryKey(res.recoveryKey); 
+        setTempSecret(res.secret); setQrCodeUrl(res.imageUrl); setTempRecoveryKey(res.recoveryKey); 
     };
 
     const handleEnable2FA = async () => {
         const ok = await enable2FA(verifyCode, tempSecret, tempRecoveryKey); 
-        if(ok) { 
-            setQrCodeUrl(null); 
-            setVerifyCode(""); 
-            setTempRecoveryKey(null);
-        }
+        if(ok) { setQrCodeUrl(null); setVerifyCode(""); setTempRecoveryKey(null); }
     };
 
     const copyRecoveryKey = () => {
@@ -241,78 +323,95 @@ const Portfolio = () => {
             </div>
 
             {showSettings && (
-                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-                    <div className="bg-slate-800 w-full max-w-lg rounded-2xl relative border border-slate-700 shadow-2xl animate-in zoom-in duration-200 overflow-hidden flex flex-col md:flex-row h-[500px]">
-                        <div className="w-full md:w-40 bg-slate-900 border-b md:border-b-0 md:border-r border-slate-700 p-4 flex md:flex-col gap-2">
-                            <h2 className="text-white font-bold mb-4 hidden md:block">Settings</h2>
-                            <button onClick={() => setSettingsTab('profile')} className={`flex items-center gap-2 p-2 rounded-lg text-sm font-bold transition ${settingsTab === 'profile' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-slate-800'}`}><AiOutlineUser /> Profile</button>
-                            <button onClick={() => setSettingsTab('security')} className={`flex items-center gap-2 p-2 rounded-lg text-sm font-bold transition ${settingsTab === 'security' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-slate-800'}`}><AiOutlineLock /> Security</button>
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[50] p-4 backdrop-blur-sm">
+                    <div className="bg-slate-800 w-full max-w-3xl rounded-2xl relative border border-slate-700 shadow-2xl animate-in zoom-in duration-200 overflow-hidden flex flex-col md:flex-row h-[600px] md:h-[500px]">
+                        <div className="w-full md:w-60 bg-slate-900 border-b md:border-b-0 md:border-r border-slate-700 p-6 flex md:flex-col gap-2 shrink-0">
+                            <h2 className="text-white font-bold text-xl mb-4 hidden md:block">Settings</h2>
+                            <button onClick={() => setSettingsTab('profile')} className={`flex items-center gap-3 p-3 rounded-xl text-sm font-bold transition ${settingsTab === 'profile' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-white hover:bg-slate-800'}`}><AiOutlineUser size={18} /> Profile</button>
+                            <button onClick={() => setSettingsTab('security')} className={`flex items-center gap-3 p-3 rounded-xl text-sm font-bold transition ${settingsTab === 'security' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-white hover:bg-slate-800'}`}><AiOutlineLock size={18} /> Security</button>
                         </div>
-                        <div className="flex-1 p-6 relative overflow-y-auto">
-                            <button onClick={() => setShowSettings(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><AiOutlineClose size={20} /></button>
+                        
+                        <div className="flex-1 p-8 relative overflow-y-auto bg-slate-800">
+                            <button onClick={() => setShowSettings(false)} className="absolute top-6 right-6 text-gray-400 hover:text-white bg-slate-900/50 p-2 rounded-full transition"><AiOutlineClose size={20} /></button>
                             
                             {settingsTab === 'profile' && (
-                                <div className="space-y-6">
-                                    <h3 className="text-white font-bold text-lg">Profile Settings</h3>
+                                <div className="space-y-8 max-w-md mx-auto md:mx-0">
+                                    <h3 className="text-white font-bold text-2xl">Profile Settings</h3>
                                     <div>
                                         <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">Display Name</label>
-                                        <div className="flex gap-2">
-                                            <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm focus:border-blue-500 outline-none" placeholder="Your Name" />
-                                            <button onClick={() => { updateUserName(newName); toast.success("Name updated"); }} className="bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-lg transition"><AiOutlineSave size={20} /></button>
+                                        <div className="flex gap-3">
+                                            <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:border-blue-500 outline-none transition" placeholder="Your Name" />
+                                            <button onClick={() => { updateUserName(newName); toast.success("Name updated"); }} className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-xl transition shadow-lg"><AiOutlineSave size={20} /></button>
                                         </div>
                                     </div>
-                                    <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700"><p className="text-xs text-gray-500 uppercase font-bold mb-1">Email</p><p className="text-white text-sm">{user?.email}</p></div>
+                                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
+                                        <p className="text-xs text-gray-500 uppercase font-bold mb-1">Email Address</p>
+                                        <p className="text-white font-mono">{user?.email}</p>
+                                    </div>
                                 </div>
                             )}
                             
                             {settingsTab === 'security' && (
-                                <div className="space-y-6">
-                                    <h3 className="text-white font-bold text-lg">Security</h3>
-                                    <div className="bg-slate-900/30 p-4 rounded-xl border border-slate-700/50">
-                                        <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2"><AiOutlineLock /> Change Password</h4>
-                                        <div className="flex gap-2">
-                                            <input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm focus:border-blue-500 outline-none" placeholder="New Password" />
-                                            <button onClick={() => { if(newPass.length < 6) toast.error("Too short"); else { changePassword(newPass); setNewPass(""); } }} className="bg-slate-700 hover:bg-white hover:text-black text-white px-4 py-2 rounded-lg text-xs font-bold transition">Update</button>
+                                <div className="space-y-8 max-w-md mx-auto md:mx-0">
+                                    <h3 className="text-white font-bold text-2xl">Security</h3>
+                                    
+                                    <div className="space-y-4">
+                                        <h4 className="text-sm font-bold text-gray-300 flex items-center gap-2">Change Password</h4>
+                                        <div className="flex gap-3">
+                                            <input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:border-blue-500 outline-none transition" placeholder="New Password" />
+                                            <button onClick={() => { if(newPass.length < 6) toast.error("Too short"); else { changePassword(newPass); setNewPass(""); } }} className="bg-slate-700 hover:bg-white hover:text-black text-white px-5 py-3 rounded-xl text-sm font-bold transition">Update</button>
                                         </div>
                                     </div>
                                     
-                                    <div className="bg-slate-900/30 p-4 rounded-xl border border-slate-700/50">
-                                        <h4 className="text-sm font-bold text-white mb-2 flex items-center gap-2"><AiOutlineQrcode /> Two-Factor Authentication</h4>
-                                        {is2FAActive ? (
-                                            <div className="flex items-center justify-between bg-green-500/10 p-3 rounded-lg border border-green-500/20">
-                                                <span className="text-green-400 text-xs font-bold flex items-center gap-1"><AiOutlineCheck /> Active</span>
-                                                <button onClick={() => setShowDisable2FAModal(true)} className="text-xs text-red-400 hover:text-white bg-red-500/10 hover:bg-red-500 px-3 py-1.5 rounded transition">Disable</button>
-                                            </div>
-                                        ) : (
-                                            <div>
-                                                {!qrCodeUrl ? (
-                                                    <div className="flex items-center justify-between">
-                                                        <p className="text-xs text-gray-400">Secure your account.</p>
-                                                        <button onClick={handleStart2FA} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition">Enable</button>
-                                                    </div>
-                                                ) : (
-                                                    <div className="space-y-4 animate-in fade-in zoom-in duration-200">
-                                                        <div className="bg-white p-2 rounded-lg w-fit mx-auto"><img src={qrCodeUrl} alt="2FA QR" className="w-32 h-32" /></div>
-                                                        <p className="text-xs text-center text-gray-400">Scan this QR Code</p>
-                                                        
-                                                        {tempRecoveryKey && (
-                                                            <div className="bg-yellow-500/10 border border-yellow-500/30 p-3 rounded-lg">
-                                                                <p className="text-[10px] text-yellow-500 font-bold uppercase mb-1 flex items-center gap-1"><AiOutlineWarning /> Recovery Key (Save This!)</p>
-                                                                <div className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700">
-                                                                    <code className="text-white text-xs font-mono break-all">{tempRecoveryKey}</code>
-                                                                    <button onClick={copyRecoveryKey} className="text-gray-400 hover:text-white ml-2 shrink-0"><AiOutlineCopy /></button>
-                                                                </div>
-                                                                <p className="text-[10px] text-gray-400 mt-1">If you lose your device, this is the only way to recover access.</p>
-                                                            </div>
-                                                        )}
+                                    <hr className="border-slate-700" />
 
-                                                        <div className="flex gap-2">
-                                                            <input type="text" placeholder="000000" value={verifyCode} onChange={(e) => setVerifyCode(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm text-center tracking-widest outline-none focus:border-blue-500" maxLength={6} />
-                                                            <button onClick={handleEnable2FA} className="bg-green-600 hover:bg-green-500 text-white px-3 py-2 rounded-lg font-bold transition">Verify</button>
-                                                        </div>
-                                                    </div>
-                                                )}
+                                    <div className="bg-slate-900/40 p-6 rounded-2xl border border-slate-700/50">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div>
+                                                <h4 className="text-white font-bold flex items-center gap-2 text-lg"><AiOutlineQrcode className="text-blue-500"/> Two-Factor Authentication</h4>
+                                                <p className="text-gray-400 text-xs mt-1">Secure your account with Google Authenticator.</p>
                                             </div>
+                                            {is2FAActive && (
+                                                <span className="bg-green-500/10 text-green-400 px-3 py-1 rounded-full text-xs font-bold border border-green-500/20 flex items-center gap-1">
+                                                    <AiOutlineCheck /> Active
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {is2FAActive ? (
+                                            <button onClick={() => setShowDisable2FAModal(true)} className="w-full bg-red-500/10 hover:bg-red-600 text-red-400 hover:text-white font-bold py-3 rounded-xl border border-red-500/30 transition">
+                                                Disable 2FA
+                                            </button>
+                                        ) : (
+                                            !qrCodeUrl ? (
+                                                <button onClick={handleStart2FA} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl shadow-lg transition">
+                                                    Enable 2FA
+                                                </button>
+                                            ) : (
+                                                <div className="space-y-6 animate-in fade-in zoom-in duration-300">
+                                                    <div className="flex flex-col items-center p-4 bg-white rounded-xl w-fit mx-auto">
+                                                        <img src={qrCodeUrl} alt="2FA QR" className="w-40 h-40" />
+                                                    </div>
+                                                    
+                                                    {tempRecoveryKey && (
+                                                        <div className="bg-yellow-500/10 border border-yellow-500/30 p-4 rounded-xl">
+                                                            <div className="flex justify-between items-center mb-2">
+                                                                <p className="text-xs text-yellow-500 font-bold uppercase flex items-center gap-1"><AiOutlineWarning /> Recovery Key</p>
+                                                                <button onClick={copyRecoveryKey} className="text-yellow-500 hover:text-white transition"><AiOutlineCopy /></button>
+                                                            </div>
+                                                            <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-center">
+                                                                <code className="text-white text-xs font-mono break-all tracking-wider">{tempRecoveryKey}</code>
+                                                            </div>
+                                                            <p className="text-[10px] text-gray-400 mt-2 text-center">Save this key safely! It's your only way to recover access.</p>
+                                                        </div>
+                                                    )}
+
+                                                    <div className="flex gap-3">
+                                                        <input type="text" placeholder="000000" value={verifyCode} onChange={(e) => setVerifyCode(e.target.value)} className="flex-1 bg-slate-950 border border-slate-700 text-white rounded-xl px-4 py-3 text-center text-lg tracking-[0.5em] font-mono outline-none focus:border-blue-500" maxLength={6} />
+                                                        <button onClick={handleEnable2FA} className="bg-green-600 hover:bg-green-500 text-white px-6 py-3 rounded-xl font-bold transition shadow-lg">Verify</button>
+                                                    </div>
+                                                </div>
+                                            )
                                         )}
                                     </div>
                                 </div>
@@ -341,19 +440,108 @@ const Portfolio = () => {
                         <h2 className="text-xl font-bold text-white mb-4">Withdraw</h2>
                         <form onSubmit={handleWithdrawSubmit} className="space-y-4">
                             <div className="flex bg-slate-900 p-1 rounded-lg">
-                                <button type="button" onClick={() => setType('cash')} className={`flex-1 py-2 rounded-md text-sm font-bold transition ${type==='cash'?'bg-blue-600 text-white':'text-gray-400 hover:text-white'}`}>Cash</button>
-                                <button type="button" onClick={() => setType('asset')} className={`flex-1 py-2 rounded-md text-sm font-bold transition ${type==='asset'?'bg-blue-600 text-white':'text-gray-400 hover:text-white'}`}>Asset</button>
+                                <button type="button" onClick={() => { setType('cash'); setAmount(""); }} className={`flex-1 py-2 rounded-md text-sm font-bold transition ${type==='cash'?'bg-blue-600 text-white':'text-gray-400 hover:text-white'}`}>Cash</button>
+                                <button type="button" onClick={() => { setType('asset'); setAmount(""); }} className={`flex-1 py-2 rounded-md text-sm font-bold transition ${type==='asset'?'bg-blue-600 text-white':'text-gray-400 hover:text-white'}`}>Asset</button>
                             </div>
-                            <input type="text" placeholder="Receiver UID" onChange={e => setTargetId(e.target.value)} className="w-full bg-slate-900 p-3 rounded-lg text-white border border-slate-700 focus:border-blue-500 outline-none" required />
+                            
+                            <div className="flex gap-2">
+                                <input type="text" placeholder="Receiver UID" value={targetId} onChange={e => setTargetId(e.target.value)} className="flex-1 bg-slate-900 p-3 rounded-lg text-white border border-slate-700 focus:border-blue-500 outline-none" required />
+                                <button type="button" onClick={() => setShowAddressBook(true)} className="bg-slate-700 hover:bg-slate-600 text-white p-3 rounded-lg border border-slate-600 transition" title="Address Book">
+                                    <AiOutlineBook size={20} />
+                                </button>
+                            </div>
+
                             {type === 'asset' && (
-                                <select onChange={e => setSelectedCoin(e.target.value)} className="w-full bg-slate-900 p-3 rounded-lg text-white border border-slate-700 focus:border-blue-500 outline-none">
+                                <select onChange={e => { setSelectedCoin(e.target.value); setAmount(""); }} className="w-full bg-slate-900 p-3 rounded-lg text-white border border-slate-700 focus:border-blue-500 outline-none">
                                     <option value="">Select Coin</option>
                                     {myAssets.map(a => <option key={a.id} value={a.id}>{a.symbol}</option>)}
                                 </select>
                             )}
-                            <input type="number" placeholder="Amount" onChange={e => setAmount(e.target.value)} className="w-full bg-slate-900 p-3 rounded-lg text-white border border-slate-700 focus:border-blue-500 outline-none" required />
+
+                            <div>
+                                <div className="relative">
+                                    <input 
+                                        type="number" 
+                                        placeholder="Amount" 
+                                        value={amount} 
+                                        onChange={handleAmountChange} 
+                                        className="w-full bg-slate-900 p-3 rounded-lg text-white border border-slate-700 focus:border-blue-500 outline-none pr-16" 
+                                        required 
+                                    />
+                                    <button 
+                                        type="button" 
+                                        onClick={() => setAmount(maxBalance)} 
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-blue-400 hover:text-white bg-blue-500/10 hover:bg-blue-500 px-2 py-1 rounded transition"
+                                    >
+                                        MAX
+                                    </button>
+                                </div>
+                                <div className="text-right mt-1">
+                                    <span className="text-[10px] text-gray-400 font-mono">
+                                        Available: <span className="text-white">{maxBalance.toLocaleString()} {type === 'cash' ? 'USD' : (selectedCoin ? selectedCoin.toUpperCase() : '')}</span>
+                                    </span>
+                                </div>
+                            </div>
+
                             <button type="submit" className="w-full bg-blue-600 py-3 rounded-xl font-bold text-white shadow-lg hover:bg-blue-500 transition">Confirm Transfer</button>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {showAddressBook && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[55] p-4 backdrop-blur-sm">
+                    <div className="bg-slate-800 p-6 rounded-2xl w-full max-w-sm relative border border-slate-700 animate-in zoom-in duration-200 flex flex-col max-h-[500px]">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-bold text-white flex items-center gap-2"><AiOutlineBook /> Contacts</h2>
+                            <button onClick={() => setShowAddressBook(false)} className="text-gray-400 hover:text-white"><AiOutlineClose size={20} /></button>
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                            {contacts.length === 0 ? (
+                                <p className="text-gray-500 text-center py-8 text-sm">No contacts saved.</p>
+                            ) : (
+                                contacts.map((c, idx) => (
+                                    <div key={idx} className="bg-slate-900 p-3 rounded-xl border border-slate-700 flex justify-between items-center group hover:border-blue-500 transition cursor-pointer" onClick={() => selectContact(c.uid)}>
+                                        <div>
+                                            <p className="text-white font-bold text-sm">{c.name}</p>
+                                            <p className="text-gray-500 text-[10px] font-mono">{c.uid.substring(0, 12)}...</p>
+                                        </div>
+                                        <button onClick={(e) => { e.stopPropagation(); deleteContact(c); }} className="text-gray-600 hover:text-red-400 p-2"><AiOutlineDelete /></button>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        <button onClick={handleAddContactClick} className="w-full mt-4 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl border border-slate-600 flex items-center justify-center gap-2 transition">
+                            <AiOutlinePlus /> Add New Contact
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {showAddContact && (
+                <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
+                    <div className="bg-slate-800 p-6 rounded-2xl w-full max-w-sm relative border border-slate-700 animate-in zoom-in duration-200">
+                        <button onClick={() => setShowAddContact(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><AiOutlineClose size={20} /></button>
+                        <h2 className="text-xl font-bold text-white mb-4">New Contact</h2>
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs text-gray-400 font-bold ml-1">Name</label>
+                                <input type="text" placeholder="Friend's Name" value={contactName} onChange={e => setContactName(e.target.value)} className="w-full bg-slate-900 p-3 rounded-lg text-white border border-slate-700 focus:border-blue-500 outline-none" />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400 font-bold ml-1">UID</label>
+                                <input type="text" placeholder="User ID" value={contactUid} onChange={e => setContactUid(e.target.value)} className="w-full bg-slate-900 p-3 rounded-lg text-white border border-slate-700 focus:border-blue-500 outline-none" />
+                            </div>
+                            <div className="bg-blue-900/20 p-3 rounded-lg border border-blue-500/30">
+                                <label className="text-[10px] text-blue-300 font-bold ml-1 flex items-center gap-1"><AiOutlineSafety /> 2FA Verification Required</label>
+                                <input type="text" placeholder="000000" maxLength={6} value={contact2FA} onChange={e => setContact2FA(e.target.value)} className="w-full bg-slate-950 p-3 rounded-lg text-white text-center tracking-widest font-mono border border-slate-700 focus:border-blue-500 outline-none mt-1" />
+                            </div>
+                            
+                            <button onClick={handleSaveContact} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl shadow-lg transition">Save Contact</button>
+                        </div>
                     </div>
                 </div>
             )}
