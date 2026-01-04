@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useCrypto } from '../context/CryptoContext';
 import { useNavigate } from 'react-router-dom';
-import { AiOutlineArrowLeft, AiOutlineCalendar, AiOutlineSearch, AiOutlineClose, AiOutlineCheckCircle, AiOutlineCopy, AiOutlineArrowRight, AiOutlineArrowDown, AiOutlineArrowUp } from 'react-icons/ai';
+import { AiOutlineArrowLeft, AiOutlineCalendar, AiOutlineSearch, AiOutlineClose, AiOutlineCheckCircle, AiOutlineCopy, AiOutlineArrowRight, AiOutlineArrowDown, AiOutlineArrowUp, AiOutlineCloudDownload } from 'react-icons/ai';
 import { BiTransfer, BiTrendingUp, BiTrendingDown, BiRevision } from 'react-icons/bi';
 import useHybridPrices from '../hooks/useHybridPrices';
 import toast from 'react-hot-toast';
@@ -11,9 +11,8 @@ const TransactionHistory = () => {
     const navigate = useNavigate();
     const livePrices = useHybridPrices();
 
-
-    const [mainFilter, setMainFilter] = useState('ALL'); 
-    const [subFilter, setSubFilter] = useState('ALL');   
+    const [mainFilter, setMainFilter] = useState('ALL');
+    const [subFilter, setSubFilter] = useState('ALL');
 
     const [activeStartDate, setActiveStartDate] = useState('');
     const [activeEndDate, setActiveEndDate] = useState('');
@@ -35,7 +34,7 @@ const TransactionHistory = () => {
         return transactions.filter(tx => {
             const txDate = new Date(tx.date?.seconds * 1000);
             const type = tx.type.toLowerCase();
-            
+
             let typeMatch = false;
             if (mainFilter === 'ALL') {
                 typeMatch = true;
@@ -52,21 +51,21 @@ const TransactionHistory = () => {
 
             const start = activeStartDate ? new Date(activeStartDate) : null;
             const end = activeEndDate ? new Date(activeEndDate) : null;
-            
+
             if (end) end.setHours(23, 59, 59);
 
             const afterStart = start ? txDate >= start : true;
             const beforeEnd = end ? txDate <= end : true;
 
             return typeMatch && afterStart && beforeEnd;
-        }).sort((a, b) => b.date?.seconds - a.date?.seconds); 
+        }).sort((a, b) => b.date?.seconds - a.date?.seconds);
     }, [transactions, mainFilter, subFilter, activeStartDate, activeEndDate]);
 
     const getIcon = (type) => {
         switch (type) {
             case 'buy': return <BiTrendingUp size={24} className="text-green-400" />;
             case 'sell': return <BiTrendingDown size={24} className="text-red-400" />;
-            case 'withdraw': 
+            case 'withdraw':
             case 'send': return <AiOutlineArrowUp size={24} className="text-red-400" />;
             case 'deposit': return <AiOutlineArrowDown size={24} className="text-green-400" />;
             case 'convert': return <BiRevision size={24} className="text-purple-400" />;
@@ -80,14 +79,51 @@ const TransactionHistory = () => {
         const rawPrice = tx.executionPrice !== undefined ? tx.executionPrice : tx.price;
         const amount = parseFloat(tx.amount) || 0;
         const price = parseFloat(rawPrice) || 0;
-        
+
         const symbol = tx.coinId?.toLowerCase();
         const currentPrice = livePrices[symbol]?.price || 0;
         const displayPrice = price > 0 ? price : currentPrice;
-        
+
         const totalValue = amount * displayPrice;
 
         return { amount, displayPrice, totalValue };
+    };
+
+    const downloadCSV = () => {
+        if (filteredTransactions.length === 0) return toast.error("No transactions to export");
+
+        const headers = ["Date", "Type", "Asset", "Amount", "Price ($)", "Total Value ($)", "Description", "Transaction ID"];
+
+        const rows = filteredTransactions.map(tx => {
+            const date = tx.date ? new Date(tx.date.seconds * 1000).toLocaleString() : '-';
+            const { amount, displayPrice, totalValue } = getTransactionDetails(tx);
+            const description = `"${tx.description || ''}"`;
+            const assetName = tx.coinId ? tx.coinId.toUpperCase() : 'USD';
+
+            return [
+                `"${date}"`,
+                tx.type.toUpperCase(),
+                assetName,
+                amount,
+                displayPrice.toFixed(2),
+                totalValue.toFixed(2),
+                description,
+                tx.id
+            ].join(",");
+        });
+
+        const csvContent = [headers.join(","), ...rows].join("\n");
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        link.setAttribute("download", `transactions_${new Date().toISOString().split('T')[0]}.csv`);
+        document.body.appendChild(link);
+
+        link.click();
+        document.body.removeChild(link);
+        toast.success("CSV Exported Successfully");
     };
 
     const copyTxID = (id) => {
@@ -99,7 +135,7 @@ const TransactionHistory = () => {
         const end = new Date();
         const start = new Date();
         start.setDate(end.getDate() - days);
-        
+
         setTempEndDate(end.toISOString().split('T')[0]);
         setTempStartDate(start.toISOString().split('T')[0]);
     };
@@ -131,28 +167,38 @@ const TransactionHistory = () => {
                         </button>
                         <h1 className="text-xl font-bold text-white">History</h1>
                     </div>
-                    <button 
-                        onClick={() => setShowDateModal(true)} 
-                        className={`p-2 rounded-full transition ${activeStartDate || activeEndDate ? 'bg-blue-600 text-white' : 'bg-slate-800 text-gray-400 hover:text-white'}`}
-                    >
-                        <AiOutlineCalendar size={20} />
-                    </button>
+
+                    <div className="flex gap-2">
+                        <button
+                            onClick={downloadCSV}
+                            className="p-2 rounded-full bg-slate-800 text-blue-400 hover:bg-blue-600 hover:text-white transition border border-slate-700 hover:border-blue-500"
+                            title="Export CSV"
+                        >
+                            <AiOutlineCloudDownload size={20} />
+                        </button>
+
+                        <button
+                            onClick={() => setShowDateModal(true)}
+                            className={`p-2 rounded-full transition ${activeStartDate || activeEndDate ? 'bg-blue-600 text-white' : 'bg-slate-800 text-gray-400 hover:text-white'}`}
+                        >
+                            <AiOutlineCalendar size={20} />
+                        </button>
+                    </div>
                 </div>
             </div>
 
             <div className="max-w-4xl mx-auto p-4 space-y-6">
-                
+
                 <div className="bg-slate-800 rounded-2xl p-4 shadow-lg border border-slate-700">
                     <div className="flex overflow-x-auto gap-2 pb-2 scrollbar-hide">
                         {['ALL', 'BUY', 'SELL', 'TRANSFER', 'CONVERT'].map(type => (
                             <button
                                 key={type}
-                                onClick={() => { setMainFilter(type); if(type !== 'TRANSFER') setSubFilter('ALL'); }}
-                                className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
-                                    mainFilter === type 
-                                    ? 'bg-blue-600 text-white shadow-lg scale-105' 
-                                    : 'bg-slate-700 text-gray-400 hover:bg-slate-600 hover:text-white'
-                                }`}
+                                onClick={() => { setMainFilter(type); if (type !== 'TRANSFER') setSubFilter('ALL'); }}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${mainFilter === type
+                                        ? 'bg-blue-600 text-white shadow-lg scale-105'
+                                        : 'bg-slate-700 text-gray-400 hover:bg-slate-600 hover:text-white'
+                                    }`}
                             >
                                 {type}
                             </button>
@@ -165,11 +211,10 @@ const TransactionHistory = () => {
                                 <button
                                     key={sub}
                                     onClick={() => setSubFilter(sub)}
-                                    className={`flex-1 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all ${
-                                        subFilter === sub 
-                                        ? 'bg-slate-600 text-white border border-slate-500' 
-                                        : 'bg-slate-900/50 text-gray-500 hover:text-gray-300'
-                                    }`}
+                                    className={`flex-1 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all ${subFilter === sub
+                                            ? 'bg-slate-600 text-white border border-slate-500'
+                                            : 'bg-slate-900/50 text-gray-500 hover:text-gray-300'
+                                        }`}
                                 >
                                     {sub}
                                 </button>
@@ -189,16 +234,16 @@ const TransactionHistory = () => {
                             </span>
                         )}
                     </div>
-                    
+
                     {filteredTransactions.length === 0 ? (
                         <div className="text-center py-20 opacity-50">
-                            <AiOutlineSearch size={48} className="mx-auto mb-2 text-gray-600"/>
+                            <AiOutlineSearch size={48} className="mx-auto mb-2 text-gray-600" />
                             <p className="text-gray-400">No transactions found.</p>
                         </div>
                     ) : (
                         filteredTransactions.map(tx => (
-                            <div 
-                                key={tx.id} 
+                            <div
+                                key={tx.id}
                                 onClick={() => setSelectedTx(tx)}
                                 className="bg-slate-800 hover:bg-slate-750 p-4 rounded-xl flex items-center justify-between border border-slate-700/50 hover:border-blue-500/50 cursor-pointer transition active:scale-[0.98]"
                             >
@@ -209,15 +254,14 @@ const TransactionHistory = () => {
                                     <div>
                                         <h3 className="text-white font-bold text-sm uppercase">{tx.type === 'send' ? 'withdraw' : tx.type}</h3>
                                         <p className="text-gray-400 text-xs font-mono">
-                                            {new Date(tx.date?.seconds * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit' })}
+                                            {new Date(tx.date?.seconds * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                         </p>
                                     </div>
                                 </div>
                                 <div className="text-right">
-                                    <p className={`font-bold text-sm ${
-                                        tx.type === 'buy' || tx.type === 'deposit' ? 'text-green-400' : 
-                                        tx.type === 'sell' || tx.type === 'withdraw' || tx.type === 'send' ? 'text-red-400' : 'text-white'
-                                    }`}>
+                                    <p className={`font-bold text-sm ${tx.type === 'buy' || tx.type === 'deposit' ? 'text-green-400' :
+                                            tx.type === 'sell' || tx.type === 'withdraw' || tx.type === 'send' ? 'text-red-400' : 'text-white'
+                                        }`}>
                                         {tx.type === 'buy' || tx.type === 'deposit' ? '+' : '-'}{tx.amount} {tx.coinId?.toUpperCase()}
                                     </p>
                                     <p className="text-xs text-blue-400 font-mono">Completed</p>
@@ -240,8 +284,8 @@ const TransactionHistory = () => {
 
                         <div className="grid grid-cols-3 gap-3 mb-6">
                             {[7, 30, 120].map(day => (
-                                <button 
-                                    key={day} 
+                                <button
+                                    key={day}
                                     onClick={() => setPresetDate(day)}
                                     className="bg-slate-700 hover:bg-slate-600 text-gray-300 py-3 rounded-xl text-xs font-bold transition border border-slate-600/30 active:scale-95"
                                 >
@@ -252,12 +296,12 @@ const TransactionHistory = () => {
 
                         <div className="space-y-4">
                             <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">Custom Range</p>
-                            
+
                             <div className="flex items-center gap-3">
                                 <div className="flex-1 bg-[#0b1426] p-3 rounded-2xl border border-slate-700/80 hover:border-blue-500/50 transition relative group">
                                     <label className="text-[10px] text-gray-500 uppercase font-bold block mb-1">From</label>
-                                    <input 
-                                        type="date" 
+                                    <input
+                                        type="date"
                                         max={new Date().toISOString().split('T')[0]}
                                         value={tempStartDate}
                                         onChange={(e) => setTempStartDate(e.target.value)}
@@ -272,8 +316,8 @@ const TransactionHistory = () => {
 
                                 <div className="flex-1 bg-[#0b1426] p-3 rounded-2xl border border-slate-700/80 hover:border-blue-500/50 transition relative group">
                                     <label className="text-[10px] text-gray-500 uppercase font-bold block mb-1">To</label>
-                                    <input 
-                                        type="date" 
+                                    <input
+                                        type="date"
                                         max={new Date().toISOString().split('T')[0]}
                                         value={tempEndDate}
                                         onChange={(e) => setTempEndDate(e.target.value)}
@@ -282,7 +326,7 @@ const TransactionHistory = () => {
                                     <AiOutlineCalendar className="absolute right-3 bottom-3 text-slate-600 group-hover:text-blue-400 transition" />
                                 </div>
                             </div>
-                            
+
                             <div className="flex gap-3 mt-6">
                                 <button onClick={resetDates} className="flex-1 bg-slate-700/50 text-gray-400 py-4 rounded-xl font-bold hover:bg-slate-700 hover:text-white transition border border-slate-600/30">
                                     Reset
@@ -299,21 +343,21 @@ const TransactionHistory = () => {
             {selectedTx && (() => {
                 const { amount, displayPrice, totalValue } = getTransactionDetails(selectedTx);
                 const isTransfer = selectedTx.type === 'send' || selectedTx.type === 'withdraw' || selectedTx.type === 'deposit';
-                
+
                 return (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
                         <div className="bg-slate-800 w-full max-w-sm rounded-3xl p-6 relative border border-slate-700 shadow-2xl animate-in fade-in zoom-in duration-200">
                             <button onClick={() => setSelectedTx(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white">
                                 <AiOutlineClose size={24} />
                             </button>
-                            
+
                             <div className="flex flex-col items-center mb-6">
                                 <div className="w-16 h-16 rounded-full bg-blue-500/10 flex items-center justify-center mb-3 text-blue-400 border border-blue-500/20">
                                     <AiOutlineCheckCircle size={32} />
                                 </div>
                                 <h2 className="text-2xl font-bold text-white uppercase">{selectedTx.type === 'send' ? 'WITHDRAW' : selectedTx.type} Success</h2>
                                 <p className="text-gray-400 text-sm mt-1">
-                                    {new Date(selectedTx.date?.seconds * 1000).toLocaleString('en-US', { 
+                                    {new Date(selectedTx.date?.seconds * 1000).toLocaleString('en-US', {
                                         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
                                         hour: '2-digit', minute: '2-digit', second: '2-digit'
                                     })}
